@@ -17,6 +17,9 @@ def get_project(db: Session, project_id: int) -> Project | None:
         .options(
             selectinload(Project.source_parts),
             selectinload(Project.hike),
+            selectinload(Project.highlights),
+            selectinload(Project.pools),
+            selectinload(Project.shorts),
             selectinload(Project.outing).selectinload(Outing.launch_site),
             selectinload(Project.outing).selectinload(Outing.landing_site),
         )

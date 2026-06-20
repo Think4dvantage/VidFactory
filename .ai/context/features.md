@@ -14,11 +14,12 @@
 
 | M3 | Highlights + Summary: highlight editor (range-streamed full flight, IN/OUT marks, names/roles/flags, timeline), `merge_overlaps` + `auto_fill`, single-pass filter_complex summary (drawtext overlays via textfile, picture highlights, NVENC), music service (folder/file, loudnorm bed, credits), full-flight-with-music (stream-copy + amix). **Verified live**: 20260502 → `Summary.mp4` (60s, overlays+music+credits) and `FullFlight_withMusic.mp4` (6.9GB). |
 
+| M4 | Shorts: highlight-driven (hook→launch?→flying→landing?→CTA, capped <30 s, titled from highlight) + random-pool batch with `UsedMap` de-dup; vertical 1080×1920 normalize (centre-crop), CTA end screen (drawtext), per-short music; NVENC; history in DB. **Verified live**: highlight short 26.0s (hook+launch+3 flying+landing+CTA) and 2 random shorts with no shared flying footage. |
+
 ### Roadmap (ordered, not yet shipped)
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| M4 | Shorts: highlight-driven (hook→launch?→flying→landing?→CTA, <30 s) + random-pool with `UsedMap`; vertical normalize; music | shorts render; batch has no footage reuse |
 | M5 | YouTube artifacts: chapters from highlights, titles/descriptions (Outing-fed), release plan, aggregated credits → `metadata.json` for the MCP | chapters/titles match highlights; MCP consumes the file |
 
 ---

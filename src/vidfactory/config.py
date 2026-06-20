@@ -37,6 +37,21 @@ class MusicSection(BaseModel):
     original_audio_volume: float = 1.0
 
 
+class ShortsSection(BaseModel):
+    # Caps chosen so a fully-loaded highlight short (hook + launch + flying*count + landing + CTA)
+    # stays under ~30s: 6 + 4 + 3*3 + 4 + 3 = 26s.
+    clip_duration: float = 3.0          # length of each sampled flying clip
+    flying_clip_count: int = 3
+    cta_duration: float = 3.0
+    hook_max: float = 6.0               # cap on the leading highlight clip
+    launch_max: float = 4.0
+    landing_max: float = 4.0
+    video_bitrate: str = "8M"
+    audio_bitrate: str = "128k"
+    cta_line1: str = "for more relaxed Paragliding"
+    cta_line2: str = "Like & Subscribe"
+
+
 class Config(BaseModel):
     # Local data dir for the SQLite DB + caches. MUST be a local filesystem — SQLite WAL mode
     # does not work over NFS/SMB, so this is deliberately separate from the NAS `archive` mount.
@@ -46,6 +61,7 @@ class Config(BaseModel):
     mounts: MountsSection = Field(default_factory=MountsSection)
     encode: EncodeSection = Field(default_factory=EncodeSection)
     music: MusicSection = Field(default_factory=MusicSection)
+    shorts: ShortsSection = Field(default_factory=ShortsSection)
 
     @property
     def db_path(self) -> Path:
@@ -54,6 +70,10 @@ class Config(BaseModel):
     @property
     def fonts_conf(self) -> Path:
         return Path(self.ffmpeg.resources_dir) / "fonts.conf"
+
+    @property
+    def cta_image(self) -> Path:
+        return Path(self.ffmpeg.resources_dir) / "EndScreenBackground.JPG"
 
     def mount_roots(self) -> dict[str, Path]:
         """name -> Path for every configured storage root."""

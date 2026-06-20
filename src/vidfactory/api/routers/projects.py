@@ -10,12 +10,15 @@ from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
+import re
+
 from vidfactory.core import filebrowser, gpu_detector, highlights, music, projects, summary
+from vidfactory.core import shorts as shorts_engine
 from vidfactory.core.concat import concatenate
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
-from vidfactory.database.models import Project
+from vidfactory.database.models import Project, Short
 from vidfactory.models.highlight import HighlightIn, HighlightOut
 
 logger = logging.getLogger(__name__)
@@ -77,6 +80,8 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
             "music_entries": _music_entries(),
             "music_defaults": get_config().music,
             "highlight_count": len(project.highlights),
+            "make_short_count": sum(1 for h in project.highlights if h.make_short),
+            "shorts": sorted(project.shorts, key=lambda s: s.created_at, reverse=True),
         },
     )
 
@@ -235,6 +240,120 @@ async def build_fullmusic_ep(project_id: int, request: Request, db: Session = De
     ov = float(form.get("original_volume") or 1.0)
     job = registry.run("fullmusic", _fullmusic_target(project_id, music_path, mv, ov))
     return {"job_id": job.id}
+
+
+@router.post("/api/projects/{project_id}/shorts/build", include_in_schema=False)
+async def build_shorts_ep(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = projects.get_project(db, project_id)
+    if project is None:
+        return Response(status_code=404)
+    if not project.full_flight_file:
+        return Response("Build the full flight first.", status_code=400)
+    form = await request.form()
+    mode = str(form.get("mode") or "highlight")
+    count = int(form.get("count") or 1)
+    music_path = str(form.get("music_path") or "")
+    mv = float(form.get("music_volume") or 0.35)
+    ov = float(form.get("original_volume") or 1.0)
+    job = registry.run("shorts", _shorts_target(project_id, mode, count, music_path, mv, ov))
+    return {"job_id": job.id}
+
+
+def _flying_pool(project: Project, full_dur: float) -> list[tuple[float, float]]:
+    ranges = [(p.start, p.end) for p in project.pools if p.kind == "flying"]
+    return ranges or [(0.0, full_dur)]
+
+
+def _role_clip(hls, role: str, cap: float) -> tuple[float, float] | None:
+    for h in hls:
+        if h.role == role:
+            return (h.start, min(h.end, h.start + cap))
+    return None
+
+
+def _next_short_path(project: Project) -> str:
+    from vidfactory.core.projects import _stem
+    root = get_config().mount_roots()["output_shorts"]
+    root.mkdir(parents=True, exist_ok=True)
+    stem = _stem(project)
+    nums = [
+        int(m.group(1))
+        for p in root.glob(f"{stem}_Short_*.mp4")
+        if (m := re.search(r"_Short_(\d+)", p.stem))
+    ]
+    nn = (max(nums) + 1) if nums else 1
+    return str(root / f"{stem}_Short_{nn:02d}.mp4")
+
+
+def _shorts_target(project_id: int, mode: str, count: int, music_path: str, mv: float, ov: float):
+    def target(job):
+        with Session(get_engine()) as db:
+            project = projects.get_project(db, project_id)
+            full = project.full_flight_file
+            cfg = get_config()
+            sc = cfg.shorts
+            runner = get_runner()
+            gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
+            w, h, dur = runner.get_video_info(full)
+            hls = highlights.list_highlights(db, project_id)
+            launch = _role_clip(hls, "launch", sc.launch_max)
+            landing = _role_clip(hls, "landing", sc.landing_max)
+            pool = _flying_pool(project, dur)
+            used: shorts_engine.UsedMap = {}
+
+            if mode == "highlight":
+                tasks = [
+                    ((hl.start, min(hl.end, hl.start + sc.hook_max)), hl.name, hl.id)
+                    for hl in hls if hl.make_short
+                ]
+                if not tasks:
+                    raise ValueError("No highlights flagged 'make short'.")
+            else:
+                tasks = [(None, None, None) for _ in range(max(1, count))]
+
+            built = []
+            n = len(tasks)
+            for i, (hook, title, hid) in enumerate(tasks):
+                if job.cancel_event.is_set():
+                    break
+                job.set_stage(f"Short {i + 1}/{n}")
+                flying = shorts_engine.pick_clips(pool, sc.flying_clip_count, sc.clip_duration, used, full)
+                clips = ([hook] if hook else []) + ([launch] if launch else []) + flying + ([landing] if landing else [])
+                if not flying:
+                    raise ValueError("Flying pool exhausted — not enough unused footage.")
+                total_needed = sum(e - s for s, e in clips) + sc.cta_duration
+                bed, tracks = (None, [])
+                if music_path:
+                    bed, tracks = music.prepare_music_bed(
+                        music_path, total_needed, Path(cfg.data_dir) / "tmp", runner,
+                        Path(cfg.data_dir) / "music_cache",
+                    )
+                out = _next_short_path(project)
+
+                def scaled(frac, spd, _i=i, _n=n):
+                    job.set_progress((_i + frac) / _n, spd)
+
+                res = shorts_engine.build_short(
+                    full, clips, out, runner, gpu, src_w=w, src_h=h,
+                    cta_image=str(cfg.cta_image), cta_duration=sc.cta_duration,
+                    cta_line1=sc.cta_line1, cta_line2=sc.cta_line2,
+                    video_bitrate=sc.video_bitrate, audio_bitrate=sc.audio_bitrate,
+                    music_bed=bed, music_volume=mv, original_volume=ov,
+                    progress_cb=scaled, cancel_event=job.cancel_event,
+                )
+                db.add(Short(
+                    project_id=project_id, output_file=res["output"], short_type=mode,
+                    duration=res["duration"], source_highlight_id=hid, title=title,
+                    segments_used={"hook": hook, "launch": launch, "flying": flying,
+                                   "landing": landing, "music": (tracks[0] if tracks else None)},
+                ))
+                db.commit()
+                if bed:
+                    Path(bed).unlink(missing_ok=True)
+                built.append(res["output"])
+            return f"{len(built)} short(s)"
+
+    return target
 
 
 def _probe_fps(runner, file: str) -> str:
