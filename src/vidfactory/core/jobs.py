@@ -86,9 +86,11 @@ class JobRegistry:
                 if job.cancel_event.is_set():
                     job.status = "cancelled"
                 else:
-                    job.status = "done"
+                    # Set result/percent BEFORE status so any concurrent SSE read that sees
+                    # "done" also sees 100% + the result (no stuck-at-99.9% race).
                     job.result = result
                     job.percent = 100.0
+                    job.status = "done"
                 logger.info("Job [%s] %s %s in %.1fs", kind, job.id, job.status, time.time() - t0)
             except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
                 job.status = "error"

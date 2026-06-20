@@ -54,11 +54,9 @@ def _concat_copy(
             lst.write(f"file '{safe}'\n")
         list_path = lst.name
     try:
-        args = [
-            "-f", "concat", "-safe", "0", "-i", list_path,
-            "-c", "copy", "-movflags", "+faststart",
-            output, "-y",
-        ]
+        # No -movflags +faststart: on multi-GB stream-copy it triggers a second full-file
+        # rewrite (slow over NFS, no progress) that made the bar appear stuck near 100%.
+        args = ["-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", output, "-y"]
         runner.encode(args, total_duration, progress_cb, cancel_event)
     finally:
         Path(list_path).unlink(missing_ok=True)
@@ -161,6 +159,8 @@ def concatenate(
         if tmp_hike:
             Path(tmp_hike).unlink(missing_ok=True)
 
+    if stage_cb:
+        stage_cb("Finalizing")
     duration = runner.get_video_info(output)[2]
     logger.info("Full flight built: %s (%.1fs)", output, duration)
     return {"output": output, "duration": duration}

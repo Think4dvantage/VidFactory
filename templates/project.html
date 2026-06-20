@@ -100,7 +100,12 @@ document.getElementById('build-btn').addEventListener('click', async () => {
     document.getElementById('b-pct').textContent = d.percent;
     document.getElementById('b-speed').textContent = d.speed || '';
     document.getElementById('b-bar').value = d.percent;
-    if (d.status === 'done') { document.getElementById('build-result').textContent = '✅ ' + (d.result || ''); btn.disabled = false; }
+    if (d.status === 'done') {
+      document.getElementById('b-pct').textContent = '100';
+      document.getElementById('b-bar').value = 100;
+      document.getElementById('build-result').textContent = '✅ ' + (d.result || '');
+      btn.disabled = false;
+    }
     if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
   });
 });
