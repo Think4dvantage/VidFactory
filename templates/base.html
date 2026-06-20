@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}VidFactory{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="h-full bg-slate-900 text-slate-100">
+  <nav class="border-b border-slate-700 bg-slate-800">
+    <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-6">
+      <a href="/" class="font-semibold text-sky-300">VidFactory</a>
+      <a href="/" class="text-sm text-slate-300 hover:text-white">Dashboard</a>
+      <a href="/browse/videos" class="text-sm text-slate-300 hover:text-white">Browse</a>
+    </div>
+  </nav>
+  <main class="mx-auto max-w-6xl px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

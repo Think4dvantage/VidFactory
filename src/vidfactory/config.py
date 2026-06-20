@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, Field
+
+
+class AppSection(BaseModel):
+    log_level: str = "INFO"
+
+
+class FFmpegSection(BaseModel):
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+    resources_dir: str = "resources"
+
+
+class MountsSection(BaseModel):
+    videos: str = "/data/InstaOut"
+    music: str = "/data/Music"
+    output_summaries: str = "/data/Summaries"
+    output_shorts: str = "/data/Shorts"
+    archive: str = "/data/Archive"
+
+
+class EncodeSection(BaseModel):
+    video_bitrate: str = "20M"
+    audio_bitrate: str = "192k"
+
+
+class MusicSection(BaseModel):
+    music_volume: float = 0.35
+    original_audio_volume: float = 1.0
+
+
+class Config(BaseModel):
+    app: AppSection = Field(default_factory=AppSection)
+    ffmpeg: FFmpegSection = Field(default_factory=FFmpegSection)
+    mounts: MountsSection = Field(default_factory=MountsSection)
+    encode: EncodeSection = Field(default_factory=EncodeSection)
+    music: MusicSection = Field(default_factory=MusicSection)
+
+    @property
+    def db_path(self) -> Path:
+        return Path(self.mounts.archive) / "vidfactory.db"
+
+    @property
+    def fonts_conf(self) -> Path:
+        return Path(self.ffmpeg.resources_dir) / "fonts.conf"
+
+    def mount_roots(self) -> dict[str, Path]:
+        """name -> Path for every configured storage root."""
+        return {
+            "videos": Path(self.mounts.videos),
+            "music": Path(self.mounts.music),
+            "output_summaries": Path(self.mounts.output_summaries),
+            "output_shorts": Path(self.mounts.output_shorts),
+            "archive": Path(self.mounts.archive),
+        }
+
+    def writable_roots(self) -> set[str]:
+        return {"output_summaries", "output_shorts", "archive"}
+
+
+# Environment overrides for the storage roots (handy in docker-compose / .env).
+_ENV_MOUNT_KEYS = {
+    "videos": "VF_VIDEOS",
+    "music": "VF_MUSIC",
+    "output_summaries": "VF_OUTPUT_SUMMARIES",
+    "output_shorts": "VF_OUTPUT_SHORTS",
+    "archive": "VF_ARCHIVE",
+}
+
+CONFIG_PATH = Path(os.environ.get("VF_CONFIG", "config.yml"))
+
+
+@lru_cache(maxsize=1)
+def get_config() -> Config:
+    data: dict = {}
+    if CONFIG_PATH.exists():
+        data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    cfg = Config(**data)
+
+    for field, env in _ENV_MOUNT_KEYS.items():
+        val = os.environ.get(env)
+        if val:
+            setattr(cfg.mounts, field, val)
+
+    log_level = os.environ.get("VF_LOG_LEVEL")
+    if log_level:
+        cfg.app.log_level = log_level
+
+    return cfg

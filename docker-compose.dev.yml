@@ -1,0 +1,38 @@
+services:
+  vidfactory:
+    build: .
+    image: vidfactory:dev
+    volumes:
+      - ./src:/app/src:ro,z
+      - ./templates:/app/templates:ro,z
+      - ./static:/app/static:ro,z
+      - ./resources:/app/resources:ro,z
+      - /mnt/pg:/data
+    environment:
+      - PYTHONPYCACHEPREFIX=/tmp/pycache
+    # GPU: Intel QSV via /dev/dri + NVIDIA NVENC via the Container Toolkit. The encoder
+    # detector falls back to libx264 if neither is available.
+    devices:
+      - /dev/dri:/dev/dri
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vidfactory-dev.rule=Host(`vf-dev.lg4.ch`)"
+      - "traefik.http.routers.vidfactory-dev.entrypoints=websecure"
+      - "traefik.http.routers.vidfactory-dev.tls=true"
+      - "traefik.http.routers.vidfactory-dev.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.vidfactory-dev.service=vidfactory-dev"
+      - "traefik.http.services.vidfactory-dev.loadbalancer.server.port=8000"
+      - "traefik.docker.network=proxy"
+
+networks:
+  proxy:
+    external: true

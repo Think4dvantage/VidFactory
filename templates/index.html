@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}VidFactory — Dashboard{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Dashboard</h1>
+
+<div class="grid gap-4 sm:grid-cols-2">
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-sm uppercase tracking-wide text-slate-400 mb-2">System</h2>
+    <dl class="text-sm space-y-1">
+      <div class="flex justify-between"><dt class="text-slate-400">Version</dt><dd>{{ version }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Encoder</dt><dd>{{ encoder }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Active jobs</dt><dd>{{ jobs|length }}</dd></div>
+    </dl>
+  </section>
+
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-sm uppercase tracking-wide text-slate-400 mb-2">Mounts</h2>
+    <ul class="text-sm space-y-1">
+      {% for name, status in mounts.items() %}
+      <li class="flex items-center justify-between gap-2">
+        <a href="/browse/{{ name }}" class="text-sky-300 hover:underline">{{ name }}</a>
+        <span class="text-xs text-slate-400 truncate">{{ roots[name] }}</span>
+        <span class="text-xs rounded px-2 py-0.5 {{ 'bg-emerald-700' if status == 'ok' else 'bg-amber-700' }}">{{ status }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

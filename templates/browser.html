@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}VidFactory — Browse {{ root }}{% endblock %}
+{% block content %}
+<div class="flex items-center gap-2 mb-4">
+  <h1 class="text-xl font-semibold">Browse</h1>
+  <div class="flex gap-1">
+    {% for r in roots %}
+    <a href="/browse/{{ r }}"
+       class="text-xs rounded px-2 py-1 {{ 'bg-sky-700' if r == root else 'bg-slate-700 hover:bg-slate-600' }}">{{ r }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="listing"
+     hx-get="/api/browse/{{ root }}?path={{ path }}"
+     hx-trigger="load"
+     class="rounded-lg border border-slate-700 bg-slate-800 p-2">
+  <p class="text-sm text-slate-400 p-2">Loading…</p>
+</div>
+{% endblock %}

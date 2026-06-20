@@ -1,0 +1,40 @@
+{% set root = listing.root %}
+<div>
+  <div class="flex items-center justify-between px-2 py-1 text-xs text-slate-400">
+    <span>/{{ listing.rel }}</span>
+    {% if listing.rel %}
+      {% set parent = listing.rel.rsplit('/', 1)[0] if '/' in listing.rel else '' %}
+      <button class="rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600"
+              hx-get="/api/browse/{{ root }}?path={{ parent }}" hx-target="#listing">⬆ up</button>
+    {% endif %}
+  </div>
+
+  {% if not listing.exists %}
+    <p class="p-3 text-sm text-amber-400">Path does not exist on this mount.</p>
+  {% else %}
+  <table class="w-full text-sm">
+    <tbody>
+      {% for e in listing.entries %}
+      <tr class="border-t border-slate-700/60 hover:bg-slate-700/40">
+        <td class="py-1 px-2 w-6">
+          {% if e.kind == 'dir' %}📁{% elif e.kind == 'video' %}🎬{% elif e.kind == 'audio' %}🎵{% elif e.kind == 'image' %}🖼{% else %}📄{% endif %}
+        </td>
+        <td class="py-1 px-2">
+          {% if e.kind == 'dir' %}
+          <button class="text-sky-300 hover:underline"
+                  hx-get="/api/browse/{{ root }}?path={{ e.rel }}" hx-target="#listing">{{ e.name }}</button>
+          {% else %}
+          <span>{{ e.name }}</span>
+          {% endif %}
+        </td>
+        <td class="py-1 px-2 text-right text-slate-400">{% if e.kind != 'dir' %}{{ e.size | filesizeformat }}{% endif %}</td>
+        <td class="py-1 px-2 text-right text-slate-500 text-xs">{{ e.mtime | ts }}</td>
+      </tr>
+      {% endfor %}
+      {% if not listing.entries %}
+      <tr><td colspan="4" class="p-3 text-slate-400">Empty folder.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

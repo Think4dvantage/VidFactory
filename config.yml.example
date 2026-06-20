@@ -1,0 +1,28 @@
+# VidFactory configuration. Copy to config.yml and adjust.
+# Mount roots can also be overridden by environment variables (shown in [brackets]).
+
+app:
+  log_level: INFO            # DEBUG | INFO | WARNING | ERROR
+
+ffmpeg:
+  # In the Docker image these are on PATH (installed via apt). Override for local runs.
+  ffmpeg_path: ffmpeg
+  ffprobe_path: ffprobe
+  # fontconfig file so drawtext can resolve fonts by name; shipped under resources/.
+  resources_dir: resources
+
+# Storage roots. In Docker these are subfolders of the mounted //172.18.10.10/pg share (/data).
+mounts:
+  videos: /data/InstaOut            # [VF_VIDEOS]   source video parts (read)
+  music: /data/Music                # [VF_MUSIC]    music library (read)
+  output_summaries: /data/Summaries # [VF_OUTPUT_SUMMARIES] summaries + full-flight-with-music (write)
+  output_shorts: /data/Shorts       # [VF_OUTPUT_SHORTS]    shorts (write)
+  archive: /data/Archive            # [VF_ARCHIVE]  SQLite DB + caches + metadata.json (write)
+
+encode:
+  video_bitrate: "20M"
+  audio_bitrate: "192k"
+
+music:
+  music_volume: 0.35                # gain on music before mixing
+  original_audio_volume: 1.0        # gain on original/clip audio
