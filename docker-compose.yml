@@ -10,6 +10,7 @@ services:
       - vf_data:/app/data
     environment:
       - VF_DATA_DIR=/app/data
+      - VF_MUSIC=/data/music
       - VF_OUTPUT_SUMMARIES=/data/summaries
       - VF_OUTPUT_SHORTS=/data/shorts
     healthcheck:

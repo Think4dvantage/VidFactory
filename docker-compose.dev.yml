@@ -13,7 +13,8 @@ services:
     environment:
       - PYTHONPYCACHEPREFIX=/tmp/pycache
       - VF_DATA_DIR=/app/data
-      # Output folder names on the share are lowercase.
+      # Folder names on the share are lowercase.
+      - VF_MUSIC=/data/music
       - VF_OUTPUT_SUMMARIES=/data/summaries
       - VF_OUTPUT_SHORTS=/data/shorts
     # GPU: NVIDIA NVENC via CDI (nvidia.com/gpu=all) + Intel QSV via /dev/dri.

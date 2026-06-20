@@ -18,7 +18,7 @@ ffmpeg:
 # Storage roots. In Docker these are subfolders of the mounted //172.18.10.10/pg share (/data).
 mounts:
   videos: /data/InstaOut            # [VF_VIDEOS]   source video parts (read)
-  music: /data/Music                # [VF_MUSIC]    music library (read) — to be added to the share
+  music: /data/music                # [VF_MUSIC]    music library (read)
   output_fullflights: /data/fullflights # [VF_OUTPUT_FULLFLIGHTS] concatenated full flights (write)
   output_summaries: /data/summaries # [VF_OUTPUT_SUMMARIES] summaries + full-flight-with-music (write)
   output_shorts: /data/shorts       # [VF_OUTPUT_SHORTS]    shorts (write)

@@ -20,7 +20,7 @@ class FFmpegSection(BaseModel):
 
 class MountsSection(BaseModel):
     videos: str = "/data/InstaOut"
-    music: str = "/data/Music"
+    music: str = "/data/music"
     output_fullflights: str = "/data/fullflights"
     output_summaries: str = "/data/summaries"
     output_shorts: str = "/data/shorts"
