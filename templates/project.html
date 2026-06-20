@@ -31,6 +31,9 @@
     <div id="build-result" class="mt-2 text-sm text-slate-300">
       {% if project.full_flight_file %}✅ {{ project.full_flight_file }}{% endif %}
     </div>
+    {% if project.full_flight_file %}
+    <a href="/projects/{{ project.id }}/editor" class="inline-block mt-3 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">✏️ Mark highlights →</a>
+    {% endif %}
   </section>
 </div>
 

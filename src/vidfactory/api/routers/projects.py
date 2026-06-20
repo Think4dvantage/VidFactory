@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import logging
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
-from vidfactory.core import filebrowser, gpu_detector, projects
+from vidfactory.core import filebrowser, gpu_detector, highlights, projects
 from vidfactory.core.concat import concatenate
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
 from vidfactory.database.models import Project
+from vidfactory.models.highlight import HighlightIn, HighlightOut
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,55 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
             "videos_root": str(videos_root),
         },
     )
+
+
+@router.get("/projects/{project_id}/editor", include_in_schema=False)
+def editor_page(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = projects.get_project(db, project_id)
+    if project is None:
+        return Response(status_code=404)
+    if not project.full_flight_file:
+        return RedirectResponse(f"/projects/{project_id}", status_code=303)
+    return templates.TemplateResponse(
+        request, "editor.html", {"project": project, "outing": project.outing}
+    )
+
+
+@router.get("/api/projects/{project_id}/fullflight/video", include_in_schema=False)
+def fullflight_video(project_id: int, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if project is None or not project.full_flight_file or not Path(project.full_flight_file).exists():
+        return Response(status_code=404)
+    # Starlette FileResponse honours Range requests, so the browser can scrub/seek.
+    return FileResponse(project.full_flight_file, media_type="video/mp4")
+
+
+@router.get("/api/projects/{project_id}/highlights", include_in_schema=False)
+def list_highlights(project_id: int, db: Session = Depends(get_db)):
+    rows = [HighlightOut.model_validate(h) for h in highlights.list_highlights(db, project_id)]
+    return {"data": rows, "total": len(rows)}
+
+
+@router.post("/api/projects/{project_id}/highlights", include_in_schema=False)
+def create_highlight(project_id: int, payload: HighlightIn, db: Session = Depends(get_db)):
+    if db.get(Project, project_id) is None:
+        return Response(status_code=404)
+    h = highlights.create_highlight(db, project_id, payload.model_dump())
+    return HighlightOut.model_validate(h)
+
+
+@router.post("/api/projects/{project_id}/highlights/{highlight_id}", include_in_schema=False)
+def update_highlight(project_id: int, highlight_id: int, payload: HighlightIn, db: Session = Depends(get_db)):
+    h = highlights.update_highlight(db, highlight_id, payload.model_dump())
+    if h is None:
+        return Response(status_code=404)
+    return HighlightOut.model_validate(h)
+
+
+@router.post("/api/projects/{project_id}/highlights/{highlight_id}/delete", include_in_schema=False)
+def delete_highlight(project_id: int, highlight_id: int, db: Session = Depends(get_db)):
+    highlights.delete_highlight(db, highlight_id)
+    return Response(status_code=204)
 
 
 @router.post("/api/projects/{project_id}/flight-type", include_in_schema=False)
