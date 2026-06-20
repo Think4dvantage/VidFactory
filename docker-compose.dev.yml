@@ -8,8 +8,14 @@ services:
       - ./static:/app/static:ro,z
       - ./resources:/app/resources:ro,z
       - /mnt/pg:/data
+      # SQLite DB on a LOCAL volume (WAL mode is unsafe on the NFS share).
+      - vf_data:/app/data
     environment:
       - PYTHONPYCACHEPREFIX=/tmp/pycache
+      - VF_DATA_DIR=/app/data
+      # Output folder names on the share are lowercase.
+      - VF_OUTPUT_SUMMARIES=/data/summaries
+      - VF_OUTPUT_SHORTS=/data/shorts
     # GPU: Intel QSV via /dev/dri (works today). The encoder detector picks
     # QSV when available, else libx264.
     devices:
@@ -36,6 +42,9 @@ services:
       - "traefik.http.routers.vidfactory-dev.service=vidfactory-dev"
       - "traefik.http.services.vidfactory-dev.loadbalancer.server.port=8000"
       - "traefik.docker.network=proxy"
+
+volumes:
+  vf_data:
 
 networks:
   proxy:

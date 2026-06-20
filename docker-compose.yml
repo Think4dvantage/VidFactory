@@ -6,6 +6,12 @@ services:
       - ./config.yml:/app/config.yml:ro
       # NAS share //172.18.10.10/pg mounted on the host at /mnt/pg.
       - /mnt/pg:/data
+      # SQLite DB on a LOCAL volume (WAL mode is unsafe on the NFS share).
+      - vf_data:/app/data
+    environment:
+      - VF_DATA_DIR=/app/data
+      - VF_OUTPUT_SUMMARIES=/data/summaries
+      - VF_OUTPUT_SHORTS=/data/shorts
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 15s
@@ -14,6 +20,9 @@ services:
       start_period: 20s
     networks:
       - proxy
+
+volumes:
+  vf_data:
 
 networks:
   proxy:

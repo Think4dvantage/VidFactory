@@ -81,19 +81,22 @@ Routers under `api/routers/` (one per domain). Filled in as endpoints are implem
 
 ## Storage & mounts
 
-One SMB share `//172.18.10.10/pg`, CIFS-mounted on the Fedora host and bound into the container at
-`/data`. Roots are env-configurable (defaults):
+The share `//172.18.10.10/pg` is **NFS-mounted** on the Fedora host at `/mnt/pg` and bound into the
+container at `/data`. Roots are env-configurable; actual folder names on the share:
 
-| Env | Default | Use |
+| Env | Value | Use |
 |---|---|---|
 | `VF_VIDEOS` | `/data/InstaOut` | source video parts (read) |
-| `VF_MUSIC` | `/data/Music` | music library (read) |
-| `VF_OUTPUT_SUMMARIES` | `/data/Summaries` | summaries + full-flight-with-music + credits (write) |
-| `VF_OUTPUT_SHORTS` | `/data/Shorts` | shorts (write) |
-| `VF_ARCHIVE` | `/data/Archive` | SQLite DB + music duration cache + metadata.json (write) |
+| `VF_MUSIC` | `/data/Music` | music library (read) — **not on the share yet** |
+| `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + full-flight-with-music + credits (write) |
+| `VF_OUTPUT_SHORTS` | `/data/shorts` | shorts (write) |
+| `VF_ARCHIVE` | `/data/Archive` | metadata.json + credits (write) |
+| (full flights) | `/data/fullflights` | concat output (wired in M2) |
 
-Startup health check verifies each root exists and has the required read/write access; a missing mount
-surfaces a clear error in the UI.
+**The SQLite DB lives on a LOCAL docker volume** (`VF_DATA_DIR=/app/data`, volume `vf_data`), **not on
+the NAS** — SQLite WAL mode does not work over NFS/SMB. The NAS `archive` root is only for produced
+artifacts (metadata.json, credits). Startup health check verifies each root; a missing mount is
+reported as `degraded` (HTTP 200, app stays reachable) — see `08-operability.md`.
 
 ---
 

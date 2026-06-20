@@ -4,6 +4,10 @@
 app:
   log_level: INFO            # DEBUG | INFO | WARNING | ERROR
 
+# Local data dir for the SQLite DB + caches. MUST be local (a docker volume) — SQLite WAL mode
+# does not work over NFS/SMB. Override with env VF_DATA_DIR. Kept separate from the NAS `archive`.
+data_dir: /app/data
+
 ffmpeg:
   # In the Docker image these are on PATH (installed via apt). Override for local runs.
   ffmpeg_path: ffmpeg
@@ -14,10 +18,11 @@ ffmpeg:
 # Storage roots. In Docker these are subfolders of the mounted //172.18.10.10/pg share (/data).
 mounts:
   videos: /data/InstaOut            # [VF_VIDEOS]   source video parts (read)
-  music: /data/Music                # [VF_MUSIC]    music library (read)
-  output_summaries: /data/Summaries # [VF_OUTPUT_SUMMARIES] summaries + full-flight-with-music (write)
-  output_shorts: /data/Shorts       # [VF_OUTPUT_SHORTS]    shorts (write)
-  archive: /data/Archive            # [VF_ARCHIVE]  SQLite DB + caches + metadata.json (write)
+  music: /data/Music                # [VF_MUSIC]    music library (read) — to be added to the share
+  output_summaries: /data/summaries # [VF_OUTPUT_SUMMARIES] summaries + full-flight-with-music (write)
+  output_shorts: /data/shorts       # [VF_OUTPUT_SHORTS]    shorts (write)
+  archive: /data/Archive            # [VF_ARCHIVE]  metadata.json + credits (write); NOT the DB
+  # Full-flight outputs go to /data/fullflights (added in M2).
 
 encode:
   video_bitrate: "20M"

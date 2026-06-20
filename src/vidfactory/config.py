@@ -37,6 +37,9 @@ class MusicSection(BaseModel):
 
 
 class Config(BaseModel):
+    # Local data dir for the SQLite DB + caches. MUST be a local filesystem — SQLite WAL mode
+    # does not work over NFS/SMB, so this is deliberately separate from the NAS `archive` mount.
+    data_dir: str = "/app/data"
     app: AppSection = Field(default_factory=AppSection)
     ffmpeg: FFmpegSection = Field(default_factory=FFmpegSection)
     mounts: MountsSection = Field(default_factory=MountsSection)
@@ -45,7 +48,7 @@ class Config(BaseModel):
 
     @property
     def db_path(self) -> Path:
-        return Path(self.mounts.archive) / "vidfactory.db"
+        return Path(self.data_dir) / "vidfactory.db"
 
     @property
     def fonts_conf(self) -> Path:
@@ -92,5 +95,9 @@ def get_config() -> Config:
     log_level = os.environ.get("VF_LOG_LEVEL")
     if log_level:
         cfg.app.log_level = log_level
+
+    data_dir = os.environ.get("VF_DATA_DIR")
+    if data_dir:
+        cfg.data_dir = data_dir
 
     return cfg
