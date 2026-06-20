@@ -171,3 +171,36 @@ def _probe_fps(runner: FFmpegRunner, file: str) -> str:
     streams = data.get("streams", [])
     rate = streams[0].get("r_frame_rate") if streams else None
     return rate or "30"
+
+
+def build_preview(
+    full_flight: str,
+    output: str,
+    runner: FFmpegRunner,
+    gpu: GPUConfig,
+    *,
+    height: int = 720,
+    video_bitrate: str = "3M",
+    audio_bitrate: str = "128k",
+    progress_cb: ProgressCb = None,
+    stage_cb: StageCb = None,
+    cancel_event=None,
+) -> dict:
+    """Low-res proxy for smooth browser scrubbing: 720p, short GOP (snappy seeking), faststart.
+
+    Same duration/timeline as the full flight, so highlights marked on the proxy map 1:1 to the 4K source.
+    """
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    total = runner.get_video_info(full_flight)[2]
+    if stage_cb:
+        stage_cb("Building 720p preview")
+    args = (
+        ["-i", full_flight, "-vf", f"scale=-2:{height}"]
+        + gpu.encoding_args(video_bitrate)
+        + ["-g", "30", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", audio_bitrate,
+           "-movflags", "+faststart", output, "-y"]
+    )
+    runner.encode(args, total, progress_cb, cancel_event)
+    duration = runner.get_video_info(output)[2]
+    logger.info("Preview proxy built: %s (%.1fs)", output, duration)
+    return {"output": output, "duration": duration}

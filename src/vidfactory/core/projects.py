@@ -98,6 +98,11 @@ def fullflight_output_path(project: Project) -> str:
     return str(root / f"{_stem(project)}_FullFlight.mp4")
 
 
+def preview_output_path(project: Project) -> str:
+    root = get_config().mount_roots()["output_fullflights"]
+    return str(root / f"{_stem(project)}_preview.mp4")
+
+
 def summary_output_path(project: Project) -> str:
     root = get_config().mount_roots()["output_summaries"]
     return str(root / f"{_stem(project)}_Summary.mp4")

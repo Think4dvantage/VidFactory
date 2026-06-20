@@ -12,6 +12,15 @@
 </div>
 
 <div id="editor" data-project="{{ project.id }}">
+  {% if has_preview %}
+  <div class="text-xs text-emerald-400 mb-1">▶ Smooth 720p preview — IN/OUT marks apply to the 4K source.</div>
+  {% else %}
+  <div class="text-sm bg-amber-900/40 border border-amber-700 rounded p-2 mb-2">
+    ⚠ Scrubbing the full 4K stream (laggy).
+    <button id="gen-prev" class="rounded bg-amber-700 hover:bg-amber-600 px-2 py-1 ml-2">Generate 720p preview</button>
+    <span id="prev-status" class="ml-2 text-amber-300"></span>
+  </div>
+  {% endif %}
   <video id="player" class="w-full max-h-[55vh] bg-black rounded" preload="metadata"
          src="/api/projects/{{ project.id }}/fullflight/video" controls></video>
 
@@ -59,4 +68,19 @@
 </div>
 
 <script src="/static/editor.js" defer></script>
+<script>
+const gp = document.getElementById("gen-prev");
+if (gp) gp.addEventListener("click", async () => {
+  gp.disabled = true;
+  const st = document.getElementById("prev-status");
+  const r = await fetch("/api/projects/{{ project.id }}/preview/build", { method: "POST" });
+  if (!r.ok) { st.textContent = "failed: " + (await r.text()); gp.disabled = false; return; }
+  const { job_id } = await r.json();
+  window.VF.followJob(job_id, (d) => {
+    st.textContent = `${d.stage || d.status} ${d.percent}%`;
+    if (d.status === "done") { st.textContent = "done — reloading…"; location.reload(); }
+    if (d.status === "error") { st.textContent = "error: " + (d.message || ""); gp.disabled = false; }
+  });
+});
+</script>
 {% endblock %}

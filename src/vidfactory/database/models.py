@@ -51,6 +51,7 @@ class Project(Base):
     outing_id: Mapped[int | None] = mapped_column(ForeignKey("outings.id"), unique=True)
     flight_type: Mapped[str] = mapped_column(String, default="normal_flight")  # | 'hike_and_fly'
     full_flight_file: Mapped[str | None] = mapped_column(String)
+    preview_file: Mapped[str | None] = mapped_column(String)  # 720p editor proxy
     summary_file: Mapped[str | None] = mapped_column(String)
     fullflight_music_file: Mapped[str | None] = mapped_column(String)
     youtube_metadata_file: Mapped[str | None] = mapped_column(String)

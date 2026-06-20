@@ -14,7 +14,7 @@ import re
 
 from vidfactory.core import filebrowser, gpu_detector, highlights, music, projects, summary
 from vidfactory.core import shorts as shorts_engine
-from vidfactory.core.concat import concatenate
+from vidfactory.core.concat import build_preview, concatenate
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
@@ -93,18 +93,53 @@ def editor_page(project_id: int, request: Request, db: Session = Depends(get_db)
         return Response(status_code=404)
     if not project.full_flight_file:
         return RedirectResponse(f"/projects/{project_id}", status_code=303)
+    has_preview = bool(project.preview_file and Path(project.preview_file).exists())
     return templates.TemplateResponse(
-        request, "editor.html", {"project": project, "outing": project.outing}
+        request,
+        "editor.html",
+        {"project": project, "outing": project.outing, "has_preview": has_preview},
     )
 
 
 @router.get("/api/projects/{project_id}/fullflight/video", include_in_schema=False)
 def fullflight_video(project_id: int, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
-    if project is None or not project.full_flight_file or not Path(project.full_flight_file).exists():
+    if project is None:
         return Response(status_code=404)
-    # Starlette FileResponse honours Range requests, so the browser can scrub/seek.
-    return FileResponse(project.full_flight_file, media_type="video/mp4")
+    # Prefer the lightweight 720p proxy for smooth scrubbing; fall back to the 4K source.
+    for path in (project.preview_file, project.full_flight_file):
+        if path and Path(path).exists():
+            return FileResponse(path, media_type="video/mp4")
+    return Response(status_code=404)
+
+
+@router.post("/api/projects/{project_id}/preview/build", include_in_schema=False)
+def build_preview_ep(project_id: int, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if project is None:
+        return Response(status_code=404)
+    if not project.full_flight_file:
+        return Response("Build the full flight first.", status_code=400)
+    job = registry.run("preview", _preview_target(project_id))
+    return {"job_id": job.id}
+
+
+def _preview_target(project_id: int):
+    def target(job):
+        with Session(get_engine()) as db:
+            project = projects.get_project(db, project_id)
+            cfg = get_config()
+            gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
+            out = projects.preview_output_path(project)
+            res = build_preview(
+                project.full_flight_file, out, get_runner(), gpu,
+                progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
+            )
+            project.preview_file = res["output"]
+            db.commit()
+            return res["output"]
+
+    return target
 
 
 @router.get("/api/projects/{project_id}/highlights", include_in_schema=False)
@@ -451,6 +486,8 @@ def _build_target(project_id: int):
             )
             project.full_flight_file = result["output"]
             db.commit()
+            # Auto-build the 720p editor proxy in the background once the full flight exists.
+            registry.run("preview", _preview_target(project_id))
             return result["output"]
 
     return target

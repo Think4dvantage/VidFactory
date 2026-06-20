@@ -46,6 +46,10 @@ libx264**. `FONTCONFIG_FILE` points at `resources/fonts.conf` so `drawtext` reso
    highlight, `drawtext` overlay = highlight name, `concat=n=…:v=1:a=1`); picture highlights via
    `-loop 1 … anullsrc`. Mix music (see below) → `DATE_Summary.mp4` + credits. Separate
    full-flight-with-music action stream-copies video and mixes music → `DATE_FullFlight_withMusic.mp4`.
+**Editor proxy:** the highlight editor streams a **720p proxy** (`preview_file`, same timeline as the
+4K full flight) for smooth browser scrubbing; built by `concat.build_preview` (short GOP + faststart)
+automatically after the full flight, or on demand. IN/OUT marks map 1:1 to the 4K source.
+
 3. **Shorts** (`shorts.py`) — all clips trimmed from the **full flight**, normalized to vertical
    1080×1920 (horizontal source: `crop=ih*9/16:ih…,scale=1080:1920`; **`setsar=1:1`+`fps=30` on every
    stream**; one `-i` per clip; CTA = looped image + `anullsrc`).
