@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}VidFactory — Flight Log{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-xl font-semibold">Flight Log <span class="text-slate-400 text-sm">({{ stats.total_flights }} flights)</span></h1>
+  <form hx-post="/api/flightlog/import" hx-encoding="multipart/form-data" hx-swap="none"
+        class="flex items-center gap-2 text-xs">
+    <input type="file" name="file" accept=".xlsx" required
+           class="text-slate-300 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-slate-100">
+    <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1"
+            onclick="return confirm('Import replaces all sites and outings. Continue?')">Import Flugbuch.xlsx</button>
+  </form>
+</div>
+
+<!-- Stats -->
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Totals</h2>
+    <dl class="text-sm space-y-1">
+      <div class="flex justify-between"><dt class="text-slate-400">Flights</dt><dd>{{ stats.total_flights }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Hours</dt><dd>{{ stats.total_hours }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Distance (km)</dt><dd>{{ stats.total_distance_km }}</dd></div>
+    </dl>
+  </section>
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Top launches</h2>
+    <ol class="text-sm space-y-0.5">
+      {% for name, n in stats.top_launches[:6] %}
+      <li class="flex justify-between"><span>{{ name }}</span><span class="text-slate-400">{{ n }}</span></li>
+      {% endfor %}
+    </ol>
+  </section>
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Top landings</h2>
+    <ol class="text-sm space-y-0.5">
+      {% for name, n in stats.top_landings[:6] %}
+      <li class="flex justify-between"><span>{{ name }}</span><span class="text-slate-400">{{ n }}</span></li>
+      {% endfor %}
+    </ol>
+  </section>
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Seasonality</h2>
+    {% set maxm = (stats.by_month.values() | list | max) if stats.by_month else 1 %}
+    {% set months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
+    <div class="space-y-0.5 text-xs">
+      {% for mnum in range(1,13) %}
+      {% set c = stats.by_month.get(mnum, 0) %}
+      <div class="flex items-center gap-1">
+        <span class="w-7 text-slate-400">{{ months[mnum] }}</span>
+        <span class="bg-sky-700 h-2 rounded" style="width: {{ (c / maxm * 100) | round }}%"></span>
+        <span class="text-slate-500">{{ c }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<!-- Add / Edit form -->
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-sm uppercase tracking-wide text-slate-400">Add outing</h2>
+  </div>
+  <div id="outing-form-panel">
+    {% set outing = None %}
+    {% include "partials/outing_form.html" %}
+  </div>
+</section>
+
+<!-- Outings table -->
+<section class="rounded-lg border border-slate-700 bg-slate-800 overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="text-slate-400 text-xs uppercase">
+      <tr class="border-b border-slate-700">
+        <th class="text-left px-3 py-2">Date</th>
+        <th class="text-left px-3 py-2">Launch → Landing</th>
+        <th class="text-left px-3 py-2">Category</th>
+        <th class="text-right px-3 py-2">Min</th>
+        <th class="text-right px-3 py-2">km</th>
+        <th class="text-right px-3 py-2">Max alt</th>
+        <th class="text-right px-3 py-2">Gain</th>
+        <th class="text-left px-3 py-2">Glider</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in outings %}
+      <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+        <td class="px-3 py-1 whitespace-nowrap">{{ o.date }}</td>
+        <td class="px-3 py-1">{{ o.launch_site_name or '—' }} → {{ o.landing_site_name or '—' }}</td>
+        <td class="px-3 py-1">{{ o.category or '' }}</td>
+        <td class="px-3 py-1 text-right">{{ o.flight_time_min if o.flight_time_min is not none else '' }}</td>
+        <td class="px-3 py-1 text-right">{{ o.distance_km if o.distance_km is not none else '' }}</td>
+        <td class="px-3 py-1 text-right">{{ o.max_alt_m if o.max_alt_m is not none else '' }}</td>
+        <td class="px-3 py-1 text-right text-slate-400">{{ o.alt_gain_m if o.alt_gain_m is not none else '' }}</td>
+        <td class="px-3 py-1 text-slate-400">{{ o.glider or '' }}</td>
+        <td class="px-3 py-1 text-right whitespace-nowrap">
+          <button class="text-sky-300 hover:underline"
+                  hx-get="/api/flightlog/outings/{{ o.id }}/form" hx-target="#outing-form-panel" hx-swap="innerHTML"
+                  onclick="window.scrollTo({top:0,behavior:'smooth'})">edit</button>
+          <button class="text-rose-400 hover:underline ml-2"
+                  hx-post="/api/flightlog/outings/{{ o.id }}/delete"
+                  hx-confirm="Delete this outing?">del</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if not outings %}<p class="p-3 text-slate-400 text-sm">No outings yet — import Flugbuch.xlsx or add one above.</p>{% endif %}
+</section>
+{% endblock %}

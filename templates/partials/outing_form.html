@@ -1,0 +1,60 @@
+{# Shared add/edit form. `outing` is an OutingOut or None. #}
+<form
+  hx-post="{{ ('/api/flightlog/outings/' ~ outing.id) if outing else '/api/flightlog/outings' }}"
+  hx-swap="none"
+  class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+
+  <label class="flex flex-col">Date
+    <input type="date" name="date" required value="{{ outing.date if outing else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+
+  <label class="flex flex-col">Launch site
+    <select name="launch_site_id" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <option value="">—</option>
+      {% for s in launch_sites %}
+      <option value="{{ s.id }}" {% if outing and outing.launch_site_id == s.id %}selected{% endif %}>{{ s.name }}{% if s.elevation_m %} ({{ s.elevation_m }}m){% endif %}</option>
+      {% endfor %}
+    </select></label>
+
+  <label class="flex flex-col">Landing site
+    <select name="landing_site_id" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <option value="">—</option>
+      {% for s in landing_sites %}
+      <option value="{{ s.id }}" {% if outing and outing.landing_site_id == s.id %}selected{% endif %}>{{ s.name }}{% if s.elevation_m %} ({{ s.elevation_m }}m){% endif %}</option>
+      {% endfor %}
+    </select></label>
+
+  <label class="flex flex-col">Category
+    <input name="category" value="{{ outing.category or '' if outing else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  <label class="flex flex-col">Flight time (min)
+    <input type="number" name="flight_time_min" value="{{ outing.flight_time_min if outing and outing.flight_time_min is not none else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  <label class="flex flex-col">Distance (km)
+    <input type="number" step="0.01" name="distance_km" value="{{ outing.distance_km if outing and outing.distance_km is not none else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+
+  <label class="flex flex-col">Max alt (m)
+    <input type="number" name="max_alt_m" value="{{ outing.max_alt_m if outing and outing.max_alt_m is not none else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  <label class="flex flex-col">Glider
+    <input name="glider" value="{{ outing.glider or '' if outing else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  <label class="flex flex-col">Harness
+    <input name="harness" value="{{ outing.harness or '' if outing else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+
+  <label class="flex flex-col">Launch type
+    <input name="launch_type" value="{{ outing.launch_type or '' if outing else '' }}"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  <label class="flex flex-col sm:col-span-2 lg:col-span-3">Comment
+    <textarea name="comment" rows="2" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">{{ outing.comment or '' if outing else '' }}</textarea></label>
+
+  <div class="sm:col-span-2 lg:col-span-3 flex gap-2">
+    <button type="submit" class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1">{{ 'Save changes' if outing else 'Add outing' }}</button>
+    {% if outing %}
+    <button type="button" class="rounded bg-slate-700 hover:bg-slate-600 px-3 py-1"
+            onclick="document.getElementById('outing-form-panel').innerHTML=''">Cancel</button>
+    {% endif %}
+  </div>
+</form>
