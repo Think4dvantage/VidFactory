@@ -6,14 +6,14 @@
 
 | Milestone | What shipped |
 |---|---|
-| M0a | `.ai/` foundation: dev-web blueprint adopted; `01-project-overview.md`, `context/architecture.md`, and this file filled with the real VidFactory model, FFmpeg pipeline, mounts, and deploy contract. (No application code yet — gated for user review.) |
+| M0a | `.ai/` foundation: dev-web blueprint adopted + filled (VidFactory model, FFmpeg pipeline, mounts, deploy contract). |
+| M0b | App skeleton + deploy: FastAPI, `config.py`, SQLite/SQLAlchemy + `db.py` (.sql migrations), ported `ffmpeg_runner`/`gpu_detector`, jobs+SSE, server-side file browser, Dockerfile/compose/`VF-dev.ps1`, GHCR publish workflow. **Deployed live at `vf-dev.lg4.ch`** (HTTP 200, LE cert). `/health` is liveness-based (200 "degraded" when only NAS mounts missing). |
+| M1 | Flight log: importer (598 flights + sites from `Flugbuch.xlsx`, frequencies match the audit), outings+sites CRUD, rollups (hours/site-frequency/seasonality), JSON API, Jinja+HTMX UI. **Imported & verified live.** |
 
 ### Roadmap (ordered, not yet shipped)
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| M0b | Skeleton & deploy: FastAPI app, `config.py`, SQLite/SQLAlchemy + `db.py`, server-side file browser, ported `ffmpeg_runner.py`+`gpu_detector.py`, `Dockerfile`/compose/`VF-dev.ps1`; register in lg4.ch; add `pg` CIFS mount | `vf-dev.lg4.ch` serves, `/health` green, browses `/data` |
-| M1 | Flight log: outings + sites CRUD + rollups (hours/site-frequency/seasonality); import 598 flights + 27/27 sites from `Flugbuch.xlsx` | importer reproduces audit numbers (Hohwald 110, Höhenmatte 306) |
 | M2 | Concatenate → Full Flight: ordered parts + sped-up hike prepend (H&F), SSE progress | `DATE_FullFlight.mp4` plays, correct order |
 | M3 | Highlights + Summary: highlight editor (player + IN/OUT marks, names, launch/landing roles), dedup, auto-fill, summary + music + credits, full-flight-with-music | `DATE_Summary.mp4` + `DATE_FullFlight_withMusic.mp4` + credits |
 | M4 | Shorts: highlight-driven (hook→launch?→flying→landing?→CTA, <30 s) + random-pool with `UsedMap`; vertical normalize; music | shorts render; batch has no footage reuse |
