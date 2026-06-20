@@ -21,6 +21,15 @@
 
 ---
 
+## Host setup (Fedora `xpsex`) — needed for a fully green deploy
+- **Mount the `pg` SMB share** at `/mnt/pg` (NAS exports only `/volume1/backup` over NFS; `pg` is
+  SMB-only, so it needs CIFS credentials). Until mounted, `/data/{InstaOut,Music,Summaries,Shorts}`
+  are missing and `/health` reports `degraded` (still HTTP 200; the app stays reachable). `Archive`
+  works because the app creates it on local disk.
+- **Repair the NVIDIA Container Toolkit** — host ldcache references a missing `libEGL_nvidia.so.<ver>`,
+  so the NVENC `deploy.resources` block in `docker-compose.dev.yml` is commented out (QSV/libx264 used
+  meanwhile). Fix on host, then uncomment to enable NVENC.
+
 ## Backlog (unordered)
 
 - **Speech-AI auto-highlights** (Whisper + Silero VAD) — port `PS_VidAggregator/SpeechSegmentExtractor.ps1`;

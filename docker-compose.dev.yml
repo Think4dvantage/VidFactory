@@ -10,17 +10,21 @@ services:
       - /mnt/pg:/data
     environment:
       - PYTHONPYCACHEPREFIX=/tmp/pycache
-    # GPU: Intel QSV via /dev/dri + NVIDIA NVENC via the Container Toolkit. The encoder
-    # detector falls back to libx264 if neither is available.
+    # GPU: Intel QSV via /dev/dri (works today). The encoder detector picks
+    # QSV when available, else libx264.
     devices:
       - /dev/dri:/dev/dri
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # NVENC: re-enable once the host NVIDIA Container Toolkit is repaired — it currently
+    # references a missing driver lib (libEGL_nvidia.so.<ver>), so the container fails to
+    # start when this block is active. Fix on host (e.g. `sudo nvidia-ctk runtime configure`
+    # + reinstall matching driver) then uncomment. NVENC needs only compute,utility,video.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [compute, utility, video]
     networks:
       - proxy
     labels:

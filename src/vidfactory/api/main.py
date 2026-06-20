@@ -87,12 +87,18 @@ def health():
     checks["encoder"] = getattr(app.state, "encoder", "unknown")
     checks["jobs_active"] = registry.active_count()
 
-    healthy = checks["sqlite"] == "ok" and all(v == "ok" for v in mounts.values())
+    # Liveness vs readiness: the container is "up" if the process + DB are serving (the flight
+    # log works off SQLite alone). Missing NAS mounts are reported as "degraded" but must NOT mark
+    # the container unhealthy — otherwise Traefik refuses to route and the UI (which surfaces the
+    # mount problem) becomes unreachable. Only a DB failure returns 503.
+    live = checks["sqlite"] == "ok"
+    mounts_ok = all(v == "ok" for v in mounts.values())
+    status = "ok" if (live and mounts_ok) else ("degraded" if live else "down")
     body = {
-        "status": "ok" if healthy else "degraded",
+        "status": status,
         "service": "vidfactory",
         "version": __version__,
         "uptime_seconds": int(time.time() - getattr(app.state, "start_time", time.time())),
         "checks": checks,
     }
-    return JSONResponse(status_code=200 if healthy else 503, content=body)
+    return JSONResponse(status_code=200 if live else 503, content=body)
