@@ -30,9 +30,12 @@ cp config.yml.example config.yml      # adjust mount roots if needed
 pwsh ./scripts/VF-dev.ps1 deploy      # → https://vf-dev.lg4.ch
 ```
 
-The container expects the NAS share `//172.18.10.10/pg` mounted at `/data` (subfolders `InstaOut`,
-`Music`, `Summaries`, `Shorts`, `Archive`).
+The container expects the NAS share `//172.18.10.10/pg` **NFS-mounted** at `/mnt/pg` → `/data`
+(folders `InstaOut`, `music`, `fullflights`, `summaries`, `shorts`, `Archive`). The SQLite DB lives on
+a **local** docker volume (`vf_data`), not the NAS (WAL doesn't work over NFS).
 
 ## Status
 
-See `.ai/context/features.md` for the milestone roadmap (M0a `.ai/` foundation and M0b skeleton first).
+Live at **https://vf-dev.lg4.ch**. Shipped: flight log (Flugbuch import), concatenate → full flight,
+highlight editor (720p proxy), summary + full-flight-with-music, shorts (highlight-driven + random).
+**Next: M5 — YouTube metadata.** See `.ai/context/features.md` for details and `.ai/` for full context.

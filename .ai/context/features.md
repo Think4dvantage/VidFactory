@@ -1,6 +1,10 @@
 # Feature History & Backlog
 
-## Current Version: pre-v0.1 (in progress)
+## Current Version: pre-v0.1 (M0–M4 shipped & live at vf-dev.lg4.ch; M5 next)
+
+> Deployed via `scripts/VF-dev.ps1 deploy` (SSH alias `xpsex` → `/opt/VidFactory`). Each milestone
+> was verified live on the host. Git branch `m0-foundation` (not pushed to a remote).
+> The editor streams a 720p proxy (`preview_file`) for smooth scrubbing.
 
 ### Shipped Milestones
 

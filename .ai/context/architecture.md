@@ -19,7 +19,7 @@ chapters, and named-short sources. `launch` and `landing` are just Highlights wi
 |---|---|---|
 | `sites` | `id`, `name`, `kind`('launch'\|'landing'), `elevation_m` | 27 launch + 27 landing master; dropdown source + VLOOKUP replacement |
 | `outings` | `id`, `date`, `launch_site_id→sites`, `landing_site_id→sites`, `glider`, `harness`, `flight_time_min`, `distance_km`, `max_alt_m`, `category`, `launch_type`, `comment` | replaces the Flugbuch sheet; **598 rows imported**. `height_diff` & `alt_gain` are **derived** (max_alt − landing_elev / max_alt − launch_elev), not stored |
-| `projects` | `id`, `outing_id→outings` (unique, nullable), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | 0..1 per outing |
+| `projects` | `id`, `outing_id→outings` (unique, nullable), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | 0..1 per outing |
 | `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw Insta360 ~30-min parts, user-orderable |
 | `hikes` | `id`, `project_id→projects`, `sources`(json list), `speed_factor`(default 32.0) | H&F only; sped up and prepended to the full flight |
 | `highlights` | `id`, `project_id→projects`, `name`, `start`, `end`, `comment`, `type`('video'\|'picture'), `role`('normal'\|'launch'\|'landing'), `image_path`(nullable), `duration`(nullable, picture), `use_in_summary`(bool), `make_short`(bool) | **the spine**; times on the full-flight timeline. At most one `launch` and one `landing`, both optional |
@@ -68,18 +68,31 @@ user music/original ratio. Writes a credits `.txt` listing every track used.
 
 ---
 
-## API Contracts
+## API Contracts (implemented through M4)
 
-Routers under `api/routers/` (one per domain). Filled in as endpoints are implemented:
+Pages return HTML (`include_in_schema=False`); mutations mostly reply `204 + HX-Redirect`; FFmpeg
+builds return `{job_id}` and stream progress over SSE. Routers under `api/routers/`:
 
-- `flightlog` — outings + sites CRUD, rollups (hours, site frequency, seasonality).
-- `projects` — project + highlights + pools CRUD.
-- `concat` / `summary` / `shorts` — start FFmpeg jobs, return a `job_id`.
-- `youtube` — generate/download `metadata.json`.
-- `browser` — list mount-root dirs/files (no upload), image thumbnails, traversal-guarded.
-- `sse` — `GET /events/{job_id}` stream of `{stage, percent, speed, eta}`; job state survives refresh.
+**main** — `GET /` dashboard · `GET /health` (liveness: 200 unless DB down; mounts reported as degraded).
 
-[Add concrete routes here as they ship, grouped by router.]
+**browser** — `GET /browse/{root}` page · `GET /api/browse/{root}?path=` (HTMX listing) ·
+`GET /api/thumb/{root}?path=` (jpeg).
+
+**flightlog** — `GET /flightlog` page · `GET/POST /api/flightlog/outings[/{id}[/delete]]` ·
+`GET /api/flightlog/outings/{id}/form` · `POST /api/flightlog/import` (xlsx upload) ·
+`GET /api/flightlog/{stats,sites,outings}` (JSON).
+
+**projects** — `GET /projects/by-outing/{outing_id}` (create+redirect) · `GET /projects/{id}` page ·
+`GET /projects/{id}/editor` page · flight-type/parts(add,move,delete)/hike mutations ·
+`GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if present) ·
+highlight CRUD `GET/POST /api/projects/{id}/highlights[/{hid}[/delete]]` (JSON) ·
+builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/build,shorts/build}` ·
+`GET /api/projects/{id}/status`.
+
+**sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result}`) ·
+`GET /api/jobs` · `POST /api/jobs/{id}/cancel`.
+
+**Not yet built (M5):** `youtube` router — generate/download `metadata.json` (chapters/titles/desc/release/credits).
 
 ---
 
