@@ -10,11 +10,12 @@
 | M0b | App skeleton + deploy: FastAPI, `config.py`, SQLite/SQLAlchemy + `db.py` (.sql migrations), ported `ffmpeg_runner`/`gpu_detector`, jobs+SSE, server-side file browser, Dockerfile/compose/`VF-dev.ps1`, GHCR publish workflow. **Deployed live at `vf-dev.lg4.ch`** (HTTP 200, LE cert). `/health` is liveness-based (200 "degraded" when only NAS mounts missing). |
 | M1 | Flight log: importer (598 flights + sites from `Flugbuch.xlsx`, frequencies match the audit), outings+sites CRUD, rollups (hours/site-frequency/seasonality), JSON API, Jinja+HTMX UI. **Imported & verified live.** |
 
+| M2 | Concatenate → Full Flight: project-from-outing, ordered source parts (reorder/remove), optional hike prepend (speed_factor; pre-sped = copy), stream-copy concat with SSE progress, NVENC for the sped hike. **Verified live**: 20260502 two 4K parts → `fullflights/20260502_FullFlight.mp4`, duration == sum of parts. |
+
 ### Roadmap (ordered, not yet shipped)
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| M2 | Concatenate → Full Flight: ordered parts + sped-up hike prepend (H&F), SSE progress | `DATE_FullFlight.mp4` plays, correct order |
 | M3 | Highlights + Summary: highlight editor (player + IN/OUT marks, names, launch/landing roles), dedup, auto-fill, summary + music + credits, full-flight-with-music | `DATE_Summary.mp4` + `DATE_FullFlight_withMusic.mp4` + credits |
 | M4 | Shorts: highlight-driven (hook→launch?→flying→landing?→CTA, <30 s) + random-pool with `UsedMap`; vertical normalize; music | shorts render; batch has no footage reuse |
 | M5 | YouTube artifacts: chapters from highlights, titles/descriptions (Outing-fed), release plan, aggregated credits → `metadata.json` for the MCP | chapters/titles match highlights; MCP consumes the file |

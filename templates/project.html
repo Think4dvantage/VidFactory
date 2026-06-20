@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}VidFactory — Project{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="/flightlog" class="text-sm text-sky-300 hover:underline">← Flight Log</a>
+  <h1 class="text-xl font-semibold mt-1">
+    Video Project
+    {% if outing %}<span class="text-slate-400 text-sm">— {{ outing.date }}
+      {{ outing.launch_site.name if outing.launch_site else '?' }} → {{ outing.landing_site.name if outing.landing_site else '?' }}</span>{% endif %}
+  </h1>
+</div>
+
+<div class="grid gap-4 lg:grid-cols-2">
+  <!-- Flight type -->
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Flight type</h2>
+    <form hx-post="/api/projects/{{ project.id }}/flight-type" hx-trigger="change" hx-swap="none" class="flex gap-4 text-sm">
+      <label class="flex items-center gap-1"><input type="radio" name="flight_type" value="normal_flight" {% if project.flight_type == 'normal_flight' %}checked{% endif %}> Normal flight</label>
+      <label class="flex items-center gap-1"><input type="radio" name="flight_type" value="hike_and_fly" {% if project.flight_type == 'hike_and_fly' %}checked{% endif %}> Hike &amp; Fly</label>
+    </form>
+  </section>
+
+  <!-- Build -->
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Full flight</h2>
+    <button id="build-btn" class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1 text-sm">▶ Build Full Flight</button>
+    <div id="build-progress" class="mt-2 text-sm" hidden>
+      <div class="text-slate-300"><span id="b-stage"></span> — <span id="b-pct">0</span>% <span id="b-speed" class="text-slate-500"></span></div>
+      <progress id="b-bar" max="100" value="0" class="w-full"></progress>
+    </div>
+    <div id="build-result" class="mt-2 text-sm text-slate-300">
+      {% if project.full_flight_file %}✅ {{ project.full_flight_file }}{% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- Source parts -->
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
+  <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Source parts (concatenation order)</h2>
+  {% if parts %}
+  <ol class="text-sm divide-y divide-slate-700/60 mb-3">
+    {% for p in parts %}
+    <li class="flex items-center justify-between py-1">
+      <span>{{ loop.index }}. {{ p.file.split('/')[-1] }}</span>
+      <span class="flex gap-1">
+        <button class="rounded bg-slate-700 hover:bg-slate-600 px-2" hx-post="/api/projects/{{ project.id }}/parts/{{ p.id }}/move" hx-vals='{"dir":"up"}' {% if loop.first %}disabled{% endif %}>↑</button>
+        <button class="rounded bg-slate-700 hover:bg-slate-600 px-2" hx-post="/api/projects/{{ project.id }}/parts/{{ p.id }}/move" hx-vals='{"dir":"down"}' {% if loop.last %}disabled{% endif %}>↓</button>
+        <button class="rounded bg-rose-800 hover:bg-rose-700 px-2" hx-post="/api/projects/{{ project.id }}/parts/{{ p.id }}/delete" hx-confirm="Remove this part?">✕</button>
+      </span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="text-slate-400 text-sm mb-3">No parts yet. Add from InstaOut below.</p>
+  {% endif %}
+
+  <form hx-post="/api/projects/{{ project.id }}/parts/add" hx-swap="none">
+    <div class="max-h-48 overflow-y-auto border border-slate-700 rounded p-2 text-sm grid sm:grid-cols-2 gap-x-4">
+      {% for f in instaout_files %}
+      <label class="flex items-center gap-1"><input type="checkbox" name="files" value="{{ f }}"> {{ f }}</label>
+      {% endfor %}
+      {% if not instaout_files %}<span class="text-slate-400">No videos found in {{ videos_root }}</span>{% endif %}
+    </div>
+    <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Add selected parts</button>
+  </form>
+</section>
+
+<!-- Hike (Hike & Fly only) -->
+{% if project.flight_type == 'hike_and_fly' %}
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
+  <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Hike (prepended)</h2>
+  <p class="text-xs text-slate-500 mb-2">Footage exported already time-lapsed → speed 1.0 (just prepend). Set a factor &gt; 1 to speed raw footage in-tool.</p>
+  <form hx-post="/api/projects/{{ project.id }}/hike" hx-swap="none">
+    <div class="max-h-40 overflow-y-auto border border-slate-700 rounded p-2 text-sm grid sm:grid-cols-2 gap-x-4">
+      {% set hike_srcs = hike.sources if hike else [] %}
+      {% for f in instaout_files %}
+      <label class="flex items-center gap-1"><input type="checkbox" name="sources" value="{{ f }}"
+        {% if (videos_root ~ '/' ~ f) in hike_srcs %}checked{% endif %}> {{ f }}</label>
+      {% endfor %}
+    </div>
+    <label class="flex items-center gap-2 text-sm mt-2">Speed factor
+      <input type="number" step="0.1" min="1" name="speed_factor" value="{{ hike.speed_factor if hike else 1.0 }}"
+             class="w-24 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Save hike</button>
+  </form>
+</section>
+{% endif %}
+
+<script>
+document.getElementById('build-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('build-btn');
+  btn.disabled = true;
+  console.log('[VF:project] build requested');
+  const r = await fetch('/api/projects/{{ project.id }}/build', { method: 'POST' });
+  if (!r.ok) { document.getElementById('build-result').textContent = '❌ ' + (await r.text()); btn.disabled = false; return; }
+  const { job_id } = await r.json();
+  document.getElementById('build-progress').hidden = false;
+  window.VF.followJob(job_id, (d) => {
+    document.getElementById('b-stage').textContent = d.stage || d.status;
+    document.getElementById('b-pct').textContent = d.percent;
+    document.getElementById('b-speed').textContent = d.speed || '';
+    document.getElementById('b-bar').value = d.percent;
+    if (d.status === 'done') { document.getElementById('build-result').textContent = '✅ ' + (d.result || ''); btn.disabled = false; }
+    if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
+  });
+});
+</script>
+{% endblock %}

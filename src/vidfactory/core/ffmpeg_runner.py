@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -109,3 +110,12 @@ class FFmpegRunner:
         if proc.returncode != 0:
             tail = "".join(stderr_lines[-30:])
             raise RuntimeError(f"FFmpeg failed (exit {proc.returncode}):\n{tail}")
+
+
+@lru_cache(maxsize=1)
+def get_runner() -> FFmpegRunner:
+    """Process-wide FFmpegRunner built from config (ffmpeg/ffprobe paths + fonts.conf)."""
+    from vidfactory.config import get_config
+
+    cfg = get_config()
+    return FFmpegRunner(cfg.ffmpeg.ffmpeg_path, cfg.ffmpeg.ffprobe_path, cfg.fonts_conf)

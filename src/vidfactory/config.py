@@ -21,8 +21,9 @@ class FFmpegSection(BaseModel):
 class MountsSection(BaseModel):
     videos: str = "/data/InstaOut"
     music: str = "/data/Music"
-    output_summaries: str = "/data/Summaries"
-    output_shorts: str = "/data/Shorts"
+    output_fullflights: str = "/data/fullflights"
+    output_summaries: str = "/data/summaries"
+    output_shorts: str = "/data/shorts"
     archive: str = "/data/Archive"
 
 
@@ -59,19 +60,21 @@ class Config(BaseModel):
         return {
             "videos": Path(self.mounts.videos),
             "music": Path(self.mounts.music),
+            "output_fullflights": Path(self.mounts.output_fullflights),
             "output_summaries": Path(self.mounts.output_summaries),
             "output_shorts": Path(self.mounts.output_shorts),
             "archive": Path(self.mounts.archive),
         }
 
     def writable_roots(self) -> set[str]:
-        return {"output_summaries", "output_shorts", "archive"}
+        return {"output_fullflights", "output_summaries", "output_shorts", "archive"}
 
 
 # Environment overrides for the storage roots (handy in docker-compose / .env).
 _ENV_MOUNT_KEYS = {
     "videos": "VF_VIDEOS",
     "music": "VF_MUSIC",
+    "output_fullflights": "VF_OUTPUT_FULLFLIGHTS",
     "output_summaries": "VF_OUTPUT_SUMMARIES",
     "output_shorts": "VF_OUTPUT_SHORTS",
     "archive": "VF_ARCHIVE",

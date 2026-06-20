@@ -19,10 +19,10 @@ ffmpeg:
 mounts:
   videos: /data/InstaOut            # [VF_VIDEOS]   source video parts (read)
   music: /data/Music                # [VF_MUSIC]    music library (read) — to be added to the share
+  output_fullflights: /data/fullflights # [VF_OUTPUT_FULLFLIGHTS] concatenated full flights (write)
   output_summaries: /data/summaries # [VF_OUTPUT_SUMMARIES] summaries + full-flight-with-music (write)
   output_shorts: /data/shorts       # [VF_OUTPUT_SHORTS]    shorts (write)
   archive: /data/Archive            # [VF_ARCHIVE]  metadata.json + credits (write); NOT the DB
-  # Full-flight outputs go to /data/fullflights (added in M2).
 
 encode:
   video_bitrate: "20M"

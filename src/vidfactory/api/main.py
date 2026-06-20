@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from vidfactory import __version__
-from vidfactory.api.routers import browser, flightlog, sse
+from vidfactory.api.routers import browser, flightlog, projects, sse
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 from vidfactory.core import filebrowser, gpu_detector
@@ -52,6 +52,7 @@ app = FastAPI(title="VidFactory", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(browser.router)
 app.include_router(flightlog.router)
+app.include_router(projects.router)
 app.include_router(sse.router)
 
 
