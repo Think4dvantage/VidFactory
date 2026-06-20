@@ -16,21 +16,13 @@ services:
       # Output folder names on the share are lowercase.
       - VF_OUTPUT_SUMMARIES=/data/summaries
       - VF_OUTPUT_SHORTS=/data/shorts
-    # GPU: Intel QSV via /dev/dri (works today). The encoder detector picks
-    # QSV when available, else libx264.
+    # GPU: NVIDIA NVENC via CDI (nvidia.com/gpu=all) + Intel QSV via /dev/dri.
+    # The encoder detector prefers NVENC, then QSV, then libx264. The CDI device
+    # requires an up-to-date /etc/cdi/nvidia.yaml on the host
+    # (regenerate after driver updates: `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).
     devices:
       - /dev/dri:/dev/dri
-    # NVENC: re-enable once the host NVIDIA Container Toolkit is repaired — it currently
-    # references a missing driver lib (libEGL_nvidia.so.<ver>), so the container fails to
-    # start when this block is active. Fix on host (e.g. `sudo nvidia-ctk runtime configure`
-    # + reinstall matching driver) then uncomment. NVENC needs only compute,utility,video.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [compute, utility, video]
+      - nvidia.com/gpu=all
     networks:
       - proxy
     labels:

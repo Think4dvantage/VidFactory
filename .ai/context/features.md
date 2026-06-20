@@ -26,9 +26,10 @@
   SMB-only, so it needs CIFS credentials). Until mounted, `/data/{InstaOut,Music,Summaries,Shorts}`
   are missing and `/health` reports `degraded` (still HTTP 200; the app stays reachable). `Archive`
   works because the app creates it on local disk.
-- **Repair the NVIDIA Container Toolkit** — host ldcache references a missing `libEGL_nvidia.so.<ver>`,
-  so the NVENC `deploy.resources` block in `docker-compose.dev.yml` is commented out (QSV/libx264 used
-  meanwhile). Fix on host, then uncomment to enable NVENC.
+- **NVIDIA NVENC — FIXED.** The CDI spec was stale after a driver update (referenced `580.95.05`);
+  regenerated with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`. Dev compose uses the
+  CDI device `nvidia.com/gpu=all`; the app now selects `h264_nvenc`. Re-run the regenerate command on
+  the host after any driver update.
 
 ## Backlog (unordered)
 
