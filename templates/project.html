@@ -89,7 +89,69 @@
 </section>
 {% endif %}
 
+{% if project.full_flight_file %}
+{% macro music_select() %}
+  <select name="music_path" class="rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm">
+    <option value="">— no music —</option>
+    {% for e in music_entries %}<option value="{{ e.path }}">{{ e.label }}</option>{% endfor %}
+  </select>
+{% endmacro %}
+
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
+  <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Summary ({{ highlight_count }} highlights marked)</h2>
+  <form id="sum-form" class="flex flex-wrap items-end gap-3 text-sm">
+    <label class="flex flex-col">Target length (s)
+      <input type="number" name="target_seconds" value="90" class="w-24 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <label class="flex flex-col">Music {{ music_select() }}</label>
+    <label class="flex flex-col">Music vol
+      <input type="number" step="0.05" name="music_volume" value="{{ music_defaults.music_volume }}" class="w-20 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <label class="flex flex-col">Orig vol
+      <input type="number" step="0.05" name="original_volume" value="{{ music_defaults.original_audio_volume }}" class="w-20 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <button type="button" data-build="/api/projects/{{ project.id }}/summary/build" data-form="sum-form" data-prefix="sum"
+            class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1">▶ Build Summary</button>
+  </form>
+  <div id="sum-progress" class="mt-2 text-sm" hidden><div><span id="sum-stage"></span> — <span id="sum-pct">0</span>%</div><progress id="sum-bar" max="100" value="0" class="w-full"></progress></div>
+  <div id="sum-result" class="mt-2 text-sm text-slate-300">{% if project.summary_file %}✅ {{ project.summary_file }}{% endif %}</div>
+</section>
+
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
+  <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Full flight + music</h2>
+  <form id="fm-form" class="flex flex-wrap items-end gap-3 text-sm">
+    <label class="flex flex-col">Music {{ music_select() }}</label>
+    <label class="flex flex-col">Music vol
+      <input type="number" step="0.05" name="music_volume" value="{{ music_defaults.music_volume }}" class="w-20 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <label class="flex flex-col">Orig vol
+      <input type="number" step="0.05" name="original_volume" value="{{ music_defaults.original_audio_volume }}" class="w-20 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <button type="button" data-build="/api/projects/{{ project.id }}/fullmusic/build" data-form="fm-form" data-prefix="fm"
+            class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1">▶ Build Full Flight + Music</button>
+  </form>
+  <div id="fm-progress" class="mt-2 text-sm" hidden><div><span id="fm-stage"></span> — <span id="fm-pct">0</span>%</div><progress id="fm-bar" max="100" value="0" class="w-full"></progress></div>
+  <div id="fm-result" class="mt-2 text-sm text-slate-300">{% if project.fullflight_music_file %}✅ {{ project.fullflight_music_file }}{% endif %}</div>
+</section>
+{% endif %}
+
 <script>
+// Generic build runner for the summary / full-music buttons (form -> job -> SSE).
+document.querySelectorAll('[data-build]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const pfx = btn.dataset.prefix;
+    const form = document.getElementById(btn.dataset.form);
+    const data = new URLSearchParams(new FormData(form));
+    btn.disabled = true;
+    const r = await fetch(btn.dataset.build, { method: 'POST', body: data });
+    if (!r.ok) { document.getElementById(pfx + '-result').textContent = '❌ ' + (await r.text()); btn.disabled = false; return; }
+    const { job_id } = await r.json();
+    document.getElementById(pfx + '-progress').hidden = false;
+    window.VF.followJob(job_id, (d) => {
+      document.getElementById(pfx + '-stage').textContent = d.stage || d.status;
+      document.getElementById(pfx + '-pct').textContent = d.percent;
+      document.getElementById(pfx + '-bar').value = d.percent;
+      if (d.status === 'done') { document.getElementById(pfx + '-pct').textContent = '100'; document.getElementById(pfx + '-bar').value = 100; document.getElementById(pfx + '-result').textContent = '✅ ' + (d.result || ''); btn.disabled = false; }
+      if (d.status === 'error') { document.getElementById(pfx + '-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
+    });
+  });
+});
+
 document.getElementById('build-btn').addEventListener('click', async () => {
   const btn = document.getElementById('build-btn');
   btn.disabled = true;

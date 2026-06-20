@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
-from vidfactory.core import filebrowser, gpu_detector, highlights, projects
+from vidfactory.core import filebrowser, gpu_detector, highlights, music, projects, summary
 from vidfactory.core.concat import concatenate
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
@@ -30,6 +30,22 @@ def _video_files() -> list[str]:
     except filebrowser.PathNotAllowed:
         return []
     return [e["rel"] for e in listing["entries"] if e["kind"] == "video"]
+
+
+def _music_entries() -> list[dict]:
+    """Folders and audio files under the music root, as {label, path} (absolute)."""
+    root = get_config().mount_roots()["music"]
+    try:
+        listing = filebrowser.list_dir("music", "")
+    except filebrowser.PathNotAllowed:
+        return []
+    out = []
+    for e in listing["entries"]:
+        if e["kind"] == "dir":
+            out.append({"label": f"📁 {e['name']} (folder)", "path": str(root / e["rel"])})
+        elif e["kind"] == "audio":
+            out.append({"label": f"🎵 {e['name']}", "path": str(root / e["rel"])})
+    return out
 
 
 def _redirect(project_id: int) -> Response:
@@ -58,6 +74,9 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
             "hike": project.hike,
             "instaout_files": _video_files(),
             "videos_root": str(videos_root),
+            "music_entries": _music_entries(),
+            "music_defaults": get_config().music,
+            "highlight_count": len(project.highlights),
         },
     )
 
@@ -183,6 +202,114 @@ def project_status(project_id: int, db: Session = Depends(get_db)):
     if project is None:
         return Response(status_code=404)
     return {"full_flight_file": project.full_flight_file}
+
+
+@router.post("/api/projects/{project_id}/summary/build", include_in_schema=False)
+async def build_summary_ep(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = projects.get_project(db, project_id)
+    if project is None:
+        return Response(status_code=404)
+    if not project.full_flight_file:
+        return Response("Build the full flight first.", status_code=400)
+    form = await request.form()
+    target = float(form.get("target_seconds") or 90)
+    music_path = str(form.get("music_path") or "")
+    mv = float(form.get("music_volume") or 0.35)
+    ov = float(form.get("original_volume") or 1.0)
+    job = registry.run("summary", _summary_target(project_id, target, music_path, mv, ov))
+    return {"job_id": job.id}
+
+
+@router.post("/api/projects/{project_id}/fullmusic/build", include_in_schema=False)
+async def build_fullmusic_ep(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = projects.get_project(db, project_id)
+    if project is None:
+        return Response(status_code=404)
+    if not project.full_flight_file:
+        return Response("Build the full flight first.", status_code=400)
+    form = await request.form()
+    music_path = str(form.get("music_path") or "")
+    if not music_path:
+        return Response("Select music.", status_code=400)
+    mv = float(form.get("music_volume") or 0.35)
+    ov = float(form.get("original_volume") or 1.0)
+    job = registry.run("fullmusic", _fullmusic_target(project_id, music_path, mv, ov))
+    return {"job_id": job.id}
+
+
+def _probe_fps(runner, file: str) -> str:
+    data = runner.probe(file)
+    streams = data.get("streams", [])
+    return (streams[0].get("r_frame_rate") if streams else None) or "30"
+
+
+def _summary_target(project_id: int, target_seconds: float, music_path: str, mv: float, ov: float):
+    def target(job):
+        with Session(get_engine()) as db:
+            project = projects.get_project(db, project_id)
+            full = project.full_flight_file
+            cfg = get_config()
+            runner = get_runner()
+            gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
+            w, h, full_dur = runner.get_video_info(full)
+            fps = _probe_fps(runner, full)
+            hls = [hl for hl in highlights.list_highlights(db, project_id) if hl.use_in_summary]
+            segs = highlights.merge_overlaps(hls)
+            segs = summary.auto_fill(segs, target_seconds, full_dur)
+            total = sum(summary._seg_duration(s) for s in segs)
+            bed, tracks = (None, [])
+            if music_path:
+                job.set_stage("Selecting music")
+                bed, tracks = music.prepare_music_bed(
+                    music_path, total, Path(cfg.data_dir) / "tmp", runner,
+                    Path(cfg.data_dir) / "music_cache",
+                )
+            out = projects.summary_output_path(project)
+            res = summary.build_summary(
+                full, segs, out, runner, gpu, width=w, height=h, fps=fps,
+                video_bitrate=cfg.encode.video_bitrate, audio_bitrate=cfg.encode.audio_bitrate,
+                music_bed=bed, music_volume=mv, original_volume=ov,
+                progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
+            )
+            if tracks:
+                music.write_credits(tracks, projects.credits_path_for(out), runner)
+            project.summary_file = res["output"]
+            db.commit()
+            if bed:
+                Path(bed).unlink(missing_ok=True)
+            return res["output"]
+
+    return target
+
+
+def _fullmusic_target(project_id: int, music_path: str, mv: float, ov: float):
+    def target(job):
+        with Session(get_engine()) as db:
+            project = projects.get_project(db, project_id)
+            full = project.full_flight_file
+            cfg = get_config()
+            runner = get_runner()
+            full_dur = runner.get_video_info(full)[2]
+            job.set_stage("Selecting music")
+            bed, tracks = music.prepare_music_bed(
+                music_path, full_dur, Path(cfg.data_dir) / "tmp", runner,
+                Path(cfg.data_dir) / "music_cache",
+            )
+            if not bed:
+                raise ValueError("No playable music found at the selected path.")
+            out = projects.fullmusic_output_path(project)
+            res = summary.build_fullflight_with_music(
+                full, out, bed, runner, music_volume=mv, original_volume=ov,
+                audio_bitrate=cfg.encode.audio_bitrate,
+                progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
+            )
+            music.write_credits(tracks, projects.credits_path_for(out), runner)
+            project.fullflight_music_file = res["output"]
+            db.commit()
+            Path(bed).unlink(missing_ok=True)
+            return res["output"]
+
+    return target
 
 
 def _build_target(project_id: int):

@@ -85,8 +85,26 @@ def set_hike(db: Session, project: Project, sources: list[str], speed_factor: fl
     db.commit()
 
 
-def fullflight_output_path(project: Project) -> str:
+def _stem(project: Project) -> str:
     date = project.outing.date if project.outing and project.outing.date else None
-    stem = date.strftime("%Y%m%d") if date else f"project{project.id}"
+    return date.strftime("%Y%m%d") if date else f"project{project.id}"
+
+
+def fullflight_output_path(project: Project) -> str:
     root = get_config().mount_roots()["output_fullflights"]
-    return str(root / f"{stem}_FullFlight.mp4")
+    return str(root / f"{_stem(project)}_FullFlight.mp4")
+
+
+def summary_output_path(project: Project) -> str:
+    root = get_config().mount_roots()["output_summaries"]
+    return str(root / f"{_stem(project)}_Summary.mp4")
+
+
+def fullmusic_output_path(project: Project) -> str:
+    root = get_config().mount_roots()["output_summaries"]
+    return str(root / f"{_stem(project)}_FullFlight_withMusic.mp4")
+
+
+def credits_path_for(video_output: str) -> str:
+    p = Path(video_output)
+    return str(p.with_name(p.stem + "_MusicCredits.txt"))
