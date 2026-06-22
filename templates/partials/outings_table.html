@@ -78,18 +78,18 @@
     </thead>
     <tbody>
       {% for o in outings %}
-      {% set has_comment = o.comment %}
-      <tr class="hover:bg-slate-700/30 {% if not has_comment %}border-b border-slate-700/50{% endif %}">
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} whitespace-nowrap">{{ o.date }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %}">{{ o.launch_site_name or '—' }} → {{ o.landing_site_name or '—' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %}">{{ o.category or '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-right">{{ o.flight_time_min if o.flight_time_min is not none else '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-right">{{ o.distance_km if o.distance_km is not none else '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-right">{{ o.max_alt_m if o.max_alt_m is not none else '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-right text-slate-400">{{ o.alt_gain_m if o.alt_gain_m is not none else '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-slate-400">{{ o.glider or '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-slate-400">{{ o.harness or '' }}</td>
-        <td class="px-3 pt-1 {% if not has_comment %}pb-1{% endif %} text-right whitespace-nowrap">
+      {% set has_detail = o.comment or o.buddy_names %}
+      <tr class="hover:bg-slate-700/30 {% if not has_detail %}border-b border-slate-700/50{% endif %}">
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} whitespace-nowrap">{{ o.date }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %}">{{ o.launch_site_name or '—' }} → {{ o.landing_site_name or '—' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %}">{{ o.category or '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right">{{ o.flight_time_min if o.flight_time_min is not none else '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right">{{ o.distance_km if o.distance_km is not none else '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right">{{ o.max_alt_m if o.max_alt_m is not none else '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right text-slate-400">{{ o.alt_gain_m if o.alt_gain_m is not none else '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-slate-400">{{ o.glider or '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-slate-400">{{ o.harness or '' }}</td>
+        <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right whitespace-nowrap">
           <a class="text-emerald-300 hover:underline" href="/projects/by-outing/{{ o.id }}">{{ '🎬' if o.has_project else '+ video' }}</a>
           <button class="text-sky-300 hover:underline ml-2"
                   hx-get="/api/flightlog/outings/{{ o.id }}/form" hx-target="#outing-form-panel" hx-swap="innerHTML"
@@ -99,10 +99,13 @@
                   hx-confirm="Delete this outing?">del</button>
         </td>
       </tr>
-      {% if has_comment %}
+      {% if has_detail %}
       <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
         <td></td>
-        <td colspan="9" class="px-3 pb-2 pt-0 text-xs text-slate-400 italic">💬 {{ o.comment }}</td>
+        <td colspan="9" class="px-3 pb-2 pt-0 text-xs">
+          {% if o.buddy_names %}<span class="text-sky-300">👥 {{ o.buddy_names | join(', ') }}</span>{% endif %}
+          {% if o.comment %}<span class="text-slate-400 italic {% if o.buddy_names %}ml-3{% endif %}">💬 {{ o.comment }}</span>{% endif %}
+        </td>
       </tr>
       {% endif %}
       {% endfor %}

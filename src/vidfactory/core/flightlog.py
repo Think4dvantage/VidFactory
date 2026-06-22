@@ -5,7 +5,10 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
-from vidfactory.database.models import Outing, Site
+from vidfactory.database.models import Buddy, Outing, Site, outing_buddies
+
+# Category value that marks a Hike & Fly outing (seeded into lookups).
+HIKEFLY_CATEGORY = "Hike&Fly"
 
 # Columns the outings table may be sorted by (maps query value -> ORM column).
 SORTABLE = {
@@ -78,6 +81,7 @@ def list_outings(
             selectinload(Outing.launch_site),
             selectinload(Outing.landing_site),
             selectinload(Outing.project),
+            selectinload(Outing.buddies),
         )
         .order_by(order, Outing.id.desc())
         .offset(offset)
@@ -96,7 +100,11 @@ def count_outings(db: Session, **filters) -> int:
 def get_outing(db: Session, outing_id: int) -> Outing | None:
     return db.execute(
         select(Outing)
-        .options(selectinload(Outing.launch_site), selectinload(Outing.landing_site))
+        .options(
+            selectinload(Outing.launch_site),
+            selectinload(Outing.landing_site),
+            selectinload(Outing.buddies),
+        )
         .where(Outing.id == outing_id)
     ).scalar_one_or_none()
 
@@ -221,3 +229,135 @@ def stats(db: Session, top: int = 10) -> dict:
             "gain": _gain_record(db),
         },
     }
+
+
+# ---- Year-over-year analytics (the Statistics page) -----------------------
+
+def _years_desc(rows) -> list[int]:
+    return sorted({int(y) for y, *_ in rows if y}, reverse=True)
+
+
+def category_year_matrix(db: Session) -> dict:
+    """{category × year} counts for the comparison table (e.g. Hike&Fly this year vs last)."""
+    rows = db.execute(
+        select(func.strftime("%Y", Outing.date), Outing.category, func.count())
+        .group_by(func.strftime("%Y", Outing.date), Outing.category)
+    ).all()
+    years = _years_desc(rows)
+    data: dict[str, dict[int, int]] = {}
+    for y, cat, n in rows:
+        if not y:
+            continue
+        key = cat if cat else "—"
+        data.setdefault(key, {})[int(y)] = data.setdefault(key, {}).get(int(y), 0) + n
+    ordered = sorted(data.items(), key=lambda kv: -sum(kv[1].values()))
+    col_totals = {yr: sum(d.get(yr, 0) for d in data.values()) for yr in years}
+    return {
+        "years": years,
+        "rows": [(k, v, sum(v.values())) for k, v in ordered],
+        "col_totals": col_totals,
+        "grand_total": sum(col_totals.values()),
+    }
+
+
+def launch_type_year(db: Session) -> dict:
+    """Forward/reverse counts + reverse % per year, and overall."""
+    rows = db.execute(
+        select(func.strftime("%Y", Outing.date), Outing.launch_type, func.count())
+        .where(Outing.launch_type.is_not(None), Outing.launch_type != "")
+        .group_by(func.strftime("%Y", Outing.date), Outing.launch_type)
+    ).all()
+    years = _years_desc(rows)
+    per = {yr: {"forward": 0, "reverse": 0, "other": 0} for yr in years}
+    for y, lt, n in rows:
+        if not y:
+            continue
+        bucket = lt if lt in ("forward", "reverse") else "other"
+        per[int(y)][bucket] += n
+
+    def _pct(d: dict) -> float:
+        total = d["forward"] + d["reverse"] + d["other"]
+        return round(d["reverse"] / total * 100, 1) if total else 0.0
+
+    year_rows, overall = [], {"forward": 0, "reverse": 0, "other": 0}
+    for yr in years:
+        d = per[yr]
+        total = d["forward"] + d["reverse"] + d["other"]
+        year_rows.append({"year": yr, **d, "total": total, "reverse_pct": _pct(d)})
+        for k in ("forward", "reverse", "other"):
+            overall[k] += d[k]
+    overall["total"] = overall["forward"] + overall["reverse"] + overall["other"]
+    overall["reverse_pct"] = _pct(overall)
+    return {"years": year_rows, "overall": overall}
+
+
+def buddy_year_matrix(db: Session) -> dict:
+    """{buddy × year} flight counts (only outings tagged with a buddy)."""
+    rows = db.execute(
+        select(func.strftime("%Y", Outing.date), Buddy.name, func.count())
+        .select_from(outing_buddies)
+        .join(Outing, Outing.id == outing_buddies.c.outing_id)
+        .join(Buddy, Buddy.id == outing_buddies.c.buddy_id)
+        .group_by(func.strftime("%Y", Outing.date), Buddy.name)
+    ).all()
+    years = _years_desc(rows)
+    data: dict[str, dict[int, int]] = {}
+    for y, name, n in rows:
+        if not y:
+            continue
+        data.setdefault(name, {})[int(y)] = n
+    ordered = sorted(data.items(), key=lambda kv: -sum(kv[1].values()))
+    col_totals = {yr: sum(d.get(yr, 0) for d in data.values()) for yr in years}
+    return {
+        "years": years,
+        "rows": [(k, v, sum(v.values())) for k, v in ordered],
+        "col_totals": col_totals,
+        "grand_total": sum(col_totals.values()),
+    }
+
+
+def hikefly_stats(db: Session) -> dict:
+    """Hike & Fly counts + climb/distance/duration totals & averages, overall and per year."""
+    rows = db.execute(
+        select(
+            func.strftime("%Y", Outing.date),
+            func.count(),
+            func.sum(Outing.climb_m),
+            func.sum(Outing.hike_distance_km),
+            func.sum(Outing.hike_duration_min),
+            func.avg(Outing.climb_m),
+            func.avg(Outing.hike_distance_km),
+            func.avg(Outing.hike_duration_min),
+        )
+        .where(Outing.category == HIKEFLY_CATEGORY)
+        .group_by(func.strftime("%Y", Outing.date))
+    ).all()
+    per_year = []
+    for y, cnt, s_climb, s_dist, s_dur, a_climb, a_dist, a_dur in sorted(
+        (r for r in rows if r[0]), key=lambda r: r[0], reverse=True
+    ):
+        per_year.append({
+            "year": int(y),
+            "count": cnt,
+            "climb_m": int(s_climb) if s_climb else 0,
+            "distance_km": round(s_dist, 1) if s_dist else 0,
+            "duration_min": int(s_dur) if s_dur else 0,
+            "avg_climb_m": round(a_climb) if a_climb else 0,
+            "avg_distance_km": round(a_dist, 1) if a_dist else 0,
+            "avg_duration_min": round(a_dur) if a_dur else 0,
+        })
+    tot = db.execute(
+        select(
+            func.count(),
+            func.sum(Outing.climb_m),
+            func.sum(Outing.hike_distance_km),
+            func.sum(Outing.hike_duration_min),
+        ).where(Outing.category == HIKEFLY_CATEGORY)
+    ).first()
+    overall = {
+        "count": tot[0] or 0,
+        "climb_m": int(tot[1]) if tot[1] else 0,
+        "distance_km": round(tot[2], 1) if tot[2] else 0,
+        "duration_min": int(tot[3]) if tot[3] else 0,
+    }
+    return {"per_year": per_year, "overall": overall}

@@ -1,4 +1,5 @@
-{# Shared add/edit form. `outing` is an OutingOut or None. `lookups` = {kind: [values]}. #}
+{# Shared add/edit form. `outing` = OutingOut or None. `lookups` = {kind: [values]};
+   `all_buddies` = [Buddy]; `hikefly_category` = the category string that reveals H&F fields. #}
 
 {%- macro lk_select(name, label, values, current) -%}
 <label class="flex flex-col">{{ label }}
@@ -37,7 +38,17 @@
       {% endfor %}
     </select></label>
 
-  {{ lk_select('category', 'Category', lookups.category, outing.category if outing else None) }}
+  {% set cur_cat = outing.category if outing else None %}
+  <label class="flex flex-col">Category
+    <select name="category" data-hf-toggle="{{ hikefly_category }}"
+            class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <option value="">—</option>
+      {% set found = namespace(v=false) %}
+      {% for v in lookups.category %}
+      <option value="{{ v }}" {% if cur_cat == v %}selected{% set found.v = true %}{% endif %}>{{ v }}</option>
+      {% endfor %}
+      {% if cur_cat and not found.v %}<option value="{{ cur_cat }}" selected>{{ cur_cat }}</option>{% endif %}
+    </select></label>
   <label class="flex flex-col">Flight time (min)
     <input type="number" name="flight_time_min" value="{{ outing.flight_time_min if outing and outing.flight_time_min is not none else '' }}"
            class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
@@ -52,7 +63,39 @@
   {{ lk_select('harness', 'Harness', lookups.harness, outing.harness if outing else None) }}
 
   {{ lk_select('launch_type', 'Launch type', lookups.launch_type, outing.launch_type if outing else None) }}
-  <label class="flex flex-col sm:col-span-2 lg:col-span-2">Comment
+
+  {# Hike & Fly metrics — shown by app.js only when category == hikefly_category #}
+  <fieldset data-hf-panel class="sm:col-span-2 lg:col-span-3 grid gap-2 sm:grid-cols-3 rounded border border-amber-700/40 bg-amber-900/10 p-2">
+    <legend class="text-xs uppercase tracking-wide text-amber-300/80 px-1">Hike &amp; Fly</legend>
+    <label class="flex flex-col">Climb (m)
+      <input type="number" name="climb_m" value="{{ outing.climb_m if outing and outing.climb_m is not none else '' }}"
+             class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <label class="flex flex-col">Hike distance (km)
+      <input type="number" step="0.01" name="hike_distance_km" value="{{ outing.hike_distance_km if outing and outing.hike_distance_km is not none else '' }}"
+             class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+    <label class="flex flex-col">Hike duration (min)
+      <input type="number" name="hike_duration_min" value="{{ outing.hike_duration_min if outing and outing.hike_duration_min is not none else '' }}"
+             class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  </fieldset>
+
+  {# Flight buddies — multiselect via checkboxes #}
+  <div class="sm:col-span-2 lg:col-span-3">
+    <span class="text-slate-400">Flight buddies</span>
+    <div class="flex flex-wrap gap-3 mt-1">
+      {% for b in all_buddies %}
+      <label class="inline-flex items-center gap-1">
+        <input type="checkbox" name="buddy_ids" value="{{ b.id }}"
+               {% if outing and b.id in outing.buddy_ids %}checked{% endif %}
+               class="rounded bg-slate-900 border-slate-600">
+        <span>{{ b.name }}</span>
+      </label>
+      {% else %}
+      <span class="text-slate-500 text-xs">No buddies yet — add them via Manage Dropdown Data.</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <label class="flex flex-col sm:col-span-2 lg:col-span-3">Comment
     <textarea name="comment" rows="2" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">{{ outing.comment or '' if outing else '' }}</textarea></label>
 
   <div class="sm:col-span-2 lg:col-span-3 flex items-center gap-2">

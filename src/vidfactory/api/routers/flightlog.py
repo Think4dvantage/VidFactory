@@ -11,7 +11,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
-from vidfactory.core import flightlog, lookups, sites
+from vidfactory.core import buddies, flightlog, lookups, sites
 from vidfactory.database.db import get_db
 from vidfactory.database.models import Outing
 from vidfactory.models.flightlog import SiteOut, serialize_outing
@@ -70,9 +70,13 @@ def _table_context(db: Session, request: Request) -> dict:
 _OUTING_FIELDS = (
     "date", "launch_site_id", "landing_site_id", "glider", "harness",
     "flight_time_min", "distance_km", "max_alt_m", "category", "launch_type", "comment",
+    "climb_m", "hike_distance_km", "hike_duration_min",
 )
-_INT_FIELDS = {"launch_site_id", "landing_site_id", "flight_time_min", "max_alt_m"}
-_FLOAT_FIELDS = {"distance_km"}
+_INT_FIELDS = {
+    "launch_site_id", "landing_site_id", "flight_time_min", "max_alt_m",
+    "climb_m", "hike_duration_min",
+}
+_FLOAT_FIELDS = {"distance_km", "hike_distance_km"}
 
 
 def _coerce(field: str, raw: str):
@@ -88,9 +92,12 @@ def _coerce(field: str, raw: str):
     return raw
 
 
-async def _form_values(request: Request) -> dict:
+async def _form_payload(request: Request) -> tuple[dict, list[int]]:
+    """Coerced scalar fields + the selected buddy ids from one form read."""
     form = await request.form()
-    return {f: _coerce(f, str(form.get(f, ""))) for f in _OUTING_FIELDS}
+    values = {f: _coerce(f, str(form.get(f, ""))) for f in _OUTING_FIELDS}
+    buddy_ids = [int(x) for x in form.getlist("buddy_ids") if str(x).isdigit()]
+    return values, buddy_ids
 
 
 def _redirect() -> Response:
@@ -107,9 +114,26 @@ def flightlog_page(request: Request, db: Session = Depends(get_db)):
         "launch_sites": sites.list_sites(db, "launch"),
         "landing_sites": sites.list_sites(db, "landing"),
         "lookups": lookups.all_options(db),
+        "all_buddies": buddies.list_all(db),
+        "hikefly_category": flightlog.HIKEFLY_CATEGORY,
     }
     ctx.update(_table_context(db, request))
     return templates.TemplateResponse(request, "flightlog.html", ctx)
+
+
+@router.get("/flightlog/stats", include_in_schema=False)
+def flightlog_stats_page(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(
+        request,
+        "flightlog_stats.html",
+        {
+            "stats": flightlog.stats(db),
+            "category_matrix": flightlog.category_year_matrix(db),
+            "launch_type": flightlog.launch_type_year(db),
+            "buddy_matrix": flightlog.buddy_year_matrix(db),
+            "hikefly": flightlog.hikefly_stats(db),
+        },
+    )
 
 
 @router.get("/api/flightlog/outings/table", include_in_schema=False)
@@ -125,6 +149,8 @@ def _form_context(db: Session, outing) -> dict:
         "launch_sites": sites.list_sites(db, "launch"),
         "landing_sites": sites.list_sites(db, "landing"),
         "lookups": lookups.all_options(db),
+        "all_buddies": buddies.list_all(db),
+        "hikefly_category": flightlog.HIKEFLY_CATEGORY,
     }
 
 
@@ -147,10 +173,12 @@ def outing_form(outing_id: int, request: Request, db: Session = Depends(get_db))
 
 @router.post("/api/flightlog/outings", include_in_schema=False)
 async def create_outing(request: Request, db: Session = Depends(get_db)):
-    values = await _form_values(request)
+    values, buddy_ids = await _form_payload(request)
     if values["date"] is None:
         return Response("date is required", status_code=400)
-    db.add(Outing(**values))
+    o = Outing(**values)
+    o.buddies = buddies.by_ids(db, buddy_ids)
+    db.add(o)
     db.commit()
     return _redirect()
 
@@ -160,8 +188,10 @@ async def update_outing(outing_id: int, request: Request, db: Session = Depends(
     o = db.get(Outing, outing_id)
     if o is None:
         return Response(status_code=404)
-    for field, value in (await _form_values(request)).items():
+    values, buddy_ids = await _form_payload(request)
+    for field, value in values.items():
         setattr(o, field, value)
+    o.buddies = buddies.by_ids(db, buddy_ids)
     db.commit()
     return _redirect()
 
@@ -175,22 +205,22 @@ def delete_outing(outing_id: int, db: Session = Depends(get_db)):
     return _redirect()
 
 
-# ---- Manage dropdown data ------------------------------------------------
+# ---- Manage dropdown data + buddies --------------------------------------
+
+def _manager_context(db: Session) -> dict:
+    return {"groups": lookups.grouped(db), "buddies": buddies.list_all(db)}
+
 
 def _manager_response(request: Request, db: Session) -> Response:
-    """Render the dropdown manager; signal the page to refresh the add form."""
-    resp = templates.TemplateResponse(
-        request, "partials/lookups_manager.html", {"groups": lookups.grouped(db)}
-    )
+    """Render the manager; signal the page to refresh the add form."""
+    resp = templates.TemplateResponse(request, "partials/lookups_manager.html", _manager_context(db))
     resp.headers["HX-Trigger"] = "lookups-changed"
     return resp
 
 
 @router.get("/api/flightlog/lookups", include_in_schema=False)
 def lookups_manager(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse(
-        request, "partials/lookups_manager.html", {"groups": lookups.grouped(db)}
-    )
+    return templates.TemplateResponse(request, "partials/lookups_manager.html", _manager_context(db))
 
 
 @router.post("/api/flightlog/lookups", include_in_schema=False)
@@ -206,12 +236,30 @@ def lookups_delete(lookup_id: int, request: Request, db: Session = Depends(get_d
     return _manager_response(request, db)
 
 
+@router.post("/api/flightlog/buddies", include_in_schema=False)
+async def buddies_add(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    buddies.add(db, str(form.get("name", "")))
+    return _manager_response(request, db)
+
+
+@router.post("/api/flightlog/buddies/{buddy_id}/delete", include_in_schema=False)
+def buddies_delete(buddy_id: int, request: Request, db: Session = Depends(get_db)):
+    buddies.delete(db, buddy_id)
+    return _manager_response(request, db)
+
+
 # ---- CSV export ----------------------------------------------------------
 
 _CSV_COLUMNS = (
     "date", "launch_site", "landing_site", "category", "flight_time_min",
-    "distance_km", "max_alt_m", "alt_gain_m", "glider", "harness", "launch_type", "comment",
+    "distance_km", "max_alt_m", "alt_gain_m", "glider", "harness", "launch_type",
+    "climb_m", "hike_distance_km", "hike_duration_min", "buddies", "comment",
 )
+
+
+def _v(value):
+    return value if value is not None else ""
 
 
 @router.get("/api/flightlog/export.csv", include_in_schema=False)
@@ -223,11 +271,10 @@ def export_csv(db: Session = Depends(get_db)):
         row = serialize_outing(o)
         writer.writerow([
             row.date, row.launch_site_name or "", row.landing_site_name or "",
-            row.category or "", row.flight_time_min if row.flight_time_min is not None else "",
-            row.distance_km if row.distance_km is not None else "",
-            row.max_alt_m if row.max_alt_m is not None else "",
-            row.alt_gain_m if row.alt_gain_m is not None else "",
-            row.glider or "", row.harness or "", row.launch_type or "", row.comment or "",
+            row.category or "", _v(row.flight_time_min), _v(row.distance_km),
+            _v(row.max_alt_m), _v(row.alt_gain_m), row.glider or "", row.harness or "",
+            row.launch_type or "", _v(row.climb_m), _v(row.hike_distance_km),
+            _v(row.hike_duration_min), ", ".join(row.buddy_names), row.comment or "",
         ])
     buf.seek(0)
     today = datetime.date.today().isoformat()

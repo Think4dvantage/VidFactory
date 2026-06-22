@@ -4,6 +4,7 @@
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-xl font-semibold">Flight Log <span class="text-slate-400 text-sm">({{ stats.total_flights }} flights)</span></h1>
   <div class="flex items-center gap-2 text-xs">
+    <a href="/flightlog/stats" class="rounded bg-sky-800 hover:bg-sky-700 px-2 py-1">📊 Statistics</a>
     <a href="/api/flightlog/export.csv" class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1">⬇ Export CSV</a>
     <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1"
             hx-get="/api/flightlog/lookups" hx-target="#modal" hx-swap="innerHTML">⚙ Manage Dropdown Data</button>
@@ -11,92 +12,6 @@
 </div>
 
 <div id="modal"></div>
-
-<!-- Stats -->
-<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Totals</h2>
-    <dl class="text-sm space-y-1">
-      <div class="flex justify-between"><dt class="text-slate-400">Flights</dt><dd>{{ stats.total_flights }}</dd></div>
-      <div class="flex justify-between"><dt class="text-slate-400">Hours</dt><dd>{{ stats.total_hours }}</dd></div>
-      <div class="flex justify-between"><dt class="text-slate-400">Distance (km)</dt><dd>{{ stats.total_distance_km }}</dd></div>
-    </dl>
-  </section>
-
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Records</h2>
-    {% set rec = stats.records %}
-    <dl class="text-sm space-y-1">
-      {% macro recrow(label, r, unit, prefix='') %}
-      <div class="flex justify-between gap-2">
-        <dt class="text-slate-400">{{ label }}</dt>
-        <dd class="text-right">{% if r %}{{ prefix }}{{ r.value }} {{ unit }}<span class="block text-xs text-slate-500">{{ r.date }}</span>{% else %}—{% endif %}</dd>
-      </div>
-      {% endmacro %}
-      {{ recrow('Longest', rec.longest, 'min') }}
-      {{ recrow('Farthest', rec.farthest, 'km') }}
-      {{ recrow('Highest', rec.highest, 'm') }}
-      {{ recrow('Max gain', rec.gain, 'm', '+') }}
-    </dl>
-  </section>
-
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Top launches</h2>
-    <ol class="text-sm space-y-0.5">
-      {% for name, n in stats.top_launches[:6] %}
-      <li class="flex justify-between"><span>{{ name }}</span><span class="text-slate-400">{{ n }}</span></li>
-      {% endfor %}
-    </ol>
-  </section>
-
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Top landings</h2>
-    <ol class="text-sm space-y-0.5">
-      {% for name, n in stats.top_landings[:6] %}
-      <li class="flex justify-between"><span>{{ name }}</span><span class="text-slate-400">{{ n }}</span></li>
-      {% endfor %}
-    </ol>
-  </section>
-
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Seasonality</h2>
-    {% set maxm = (stats.by_month.values() | list | max) if stats.by_month else 1 %}
-    {% set months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
-    <div class="space-y-0.5 text-xs">
-      {% for mnum in range(1,13) %}
-      {% set c = stats.by_month.get(mnum, 0) %}
-      <div class="flex items-center gap-1">
-        <span class="w-7 text-slate-400">{{ months[mnum] }}</span>
-        <span class="bg-sky-700 h-2 rounded" style="width: {{ (c / maxm * 100) | round }}%"></span>
-        <span class="text-slate-500">{{ c }}</span>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 lg:col-span-2">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">By year</h2>
-    {% set maxy = (stats.by_year.values() | list | max) if stats.by_year else 1 %}
-    <div class="space-y-0.5 text-xs">
-      {% for yr, c in stats.by_year.items() | sort(reverse=true) %}
-      <div class="flex items-center gap-2">
-        <a href="/flightlog?year={{ yr }}" class="w-10 text-slate-400 hover:text-sky-300">{{ yr }}</a>
-        <span class="bg-emerald-700 h-2 rounded" style="width: {{ (c / maxy * 100) | round }}%"></span>
-        <span class="text-slate-500">{{ c }}</span>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">By category</h2>
-    <ol class="text-sm space-y-0.5">
-      {% for name, n in stats.by_category[:8] %}
-      <li class="flex justify-between"><span>{{ name }}</span><span class="text-slate-400">{{ n }}</span></li>
-      {% endfor %}
-    </ol>
-  </section>
-</div>
 
 <!-- Add / Edit form -->
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mb-6">

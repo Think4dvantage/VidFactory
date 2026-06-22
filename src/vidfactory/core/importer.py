@@ -17,7 +17,7 @@ import openpyxl
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from vidfactory.database.models import Outing, Project, Site
+from vidfactory.database.models import Outing, Project, Site, outing_buddies
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ def import_flugbuch(path: str | Path, db: Session, replace: bool = True) -> dict
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
 
     if replace:
+        db.execute(outing_buddies.delete())
         db.execute(delete(Project))
         db.execute(delete(Outing))
         db.execute(delete(Site))

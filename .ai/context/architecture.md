@@ -18,7 +18,9 @@ chapters, and named-short sources. `launch` and `landing` are just Highlights wi
 | Table | Key columns | Notes |
 |---|---|---|
 | `sites` | `id`, `name`, `kind`('launch'\|'landing'), `elevation_m` | 27 launch + 27 landing master; dropdown source + VLOOKUP replacement |
-| `outings` | `id`, `date`, `launch_site_id→sites`, `landing_site_id→sites`, `glider`, `harness`, `flight_time_min`, `distance_km`, `max_alt_m`, `category`, `launch_type`, `comment` | replaces the Flugbuch sheet; **598 rows imported**. `height_diff` & `alt_gain` are **derived** (max_alt − landing_elev / max_alt − launch_elev), not stored |
+| `outings` | `id`, `date`, `launch_site_id→sites`, `landing_site_id→sites`, `glider`, `harness`, `flight_time_min`, `distance_km`, `max_alt_m`, `category`, `launch_type`, `comment`, `climb_m`, `hike_distance_km`, `hike_duration_min` | replaces the Flugbuch sheet; **598 rows imported**. `height_diff` & `alt_gain` are **derived** (max_alt − landing_elev / max_alt − launch_elev), not stored. `launch_type` is `forward`/`reverse` (normalised from legacy `f`/`r`). The three `*hike*`/`climb_m` columns are Hike&Fly-only metrics. |
+| `lookups` | `id`, `kind`('category'\|'glider'\|'harness'\|'launch_type'), `value`, `sort_order` | managed dropdown values for the outing form (migration 0003, seeded from existing data) |
+| `buddies` + `outing_buddies` | `buddies(id,name,sort_order)`; join `outing_buddies(outing_id,buddy_id)` | people the user flies with; multiselect per outing (migration 0004). ORM `secondary` relationship handles cleanup on single deletes; importer clears the join on `replace` |
 | `projects` | `id`, `outing_id→outings` (unique, nullable), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | 0..1 per outing |
 | `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw Insta360 ~30-min parts, user-orderable |
 | `hikes` | `id`, `project_id→projects`, `sources`(json list), `speed_factor`(default 32.0) | H&F only; sped up and prepended to the full flight |
@@ -80,9 +82,12 @@ builds return `{job_id}` and stream progress over SSE. Routers under `api/router
 **browser** — `GET /browse/{root}` page · `GET /api/browse/{root}?path=` (HTMX listing) ·
 `GET /api/thumb/{root}?path=` (jpeg).
 
-**flightlog** — `GET /flightlog` page · `GET/POST /api/flightlog/outings[/{id}[/delete]]` ·
-`GET /api/flightlog/outings/{id}/form` · `POST /api/flightlog/import` (xlsx upload) ·
-`GET /api/flightlog/{stats,sites,outings}` (JSON).
+**flightlog** — `GET /flightlog` page (filter/sort/paginate via `?search/year/category/glider/sort/direction/page`) ·
+`GET /flightlog/stats` page (year-comparison matrices: category×year, launch-type+reverse-%, buddy×year, Hike&Fly) ·
+`GET /api/flightlog/outings/table` (HTMX table partial) · `GET/POST /api/flightlog/outings[/{id}[/delete]]` ·
+`GET /api/flightlog/outings/{new|id}/form` · lookups CRUD `GET/POST /api/flightlog/lookups[/{id}/delete]` ·
+buddies CRUD `POST /api/flightlog/buddies[/{id}/delete]` · `GET /api/flightlog/export.csv` ·
+`GET /api/flightlog/{stats,sites,outings}` (JSON). (xlsx import is CLI-only: `python -m vidfactory.core.importer`.)
 
 **projects** — `GET /projects/by-outing/{outing_id}` (create+redirect) · `GET /projects/{id}` page ·
 `GET /projects/{id}/editor` page · flight-type/parts(add,move,delete)/hike mutations ·

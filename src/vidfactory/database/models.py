@@ -2,12 +2,23 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Table, Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     pass
+
+
+# Many-to-many: which buddies were on a given outing.
+outing_buddies = Table(
+    "outing_buddies",
+    Base.metadata,
+    Column("outing_id", ForeignKey("outings.id", ondelete="CASCADE"), primary_key=True),
+    Column("buddy_id", ForeignKey("buddies.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Site(Base):
@@ -30,6 +41,16 @@ class Lookup(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class Buddy(Base):
+    """A person the user flies with (multiselect on each outing)."""
+
+    __tablename__ = "buddies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class Outing(Base):
     """One flight. Replaces the Flugbuch sheet. Optionally owns one Project."""
 
@@ -47,10 +68,15 @@ class Outing(Base):
     category: Mapped[str | None] = mapped_column(String)
     launch_type: Mapped[str | None] = mapped_column(String)
     comment: Mapped[str | None] = mapped_column(Text)
+    # Hike & Fly metrics (only filled when category is Hike&Fly).
+    climb_m: Mapped[int | None] = mapped_column(Integer)
+    hike_distance_km: Mapped[float | None] = mapped_column(Float)
+    hike_duration_min: Mapped[int | None] = mapped_column(Integer)
 
     launch_site: Mapped[Site | None] = relationship(foreign_keys=[launch_site_id])
     landing_site: Mapped[Site | None] = relationship(foreign_keys=[landing_site_id])
     project: Mapped["Project | None"] = relationship(back_populates="outing", uselist=False)
+    buddies: Mapped[list[Buddy]] = relationship(secondary=outing_buddies, order_by="Buddy.name")
 
 
 class Project(Base):

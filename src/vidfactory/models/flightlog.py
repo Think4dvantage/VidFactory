@@ -28,6 +28,9 @@ class OutingBase(BaseModel):
     category: str | None = None
     launch_type: str | None = None
     comment: str | None = None
+    climb_m: int | None = None
+    hike_distance_km: float | None = None
+    hike_duration_min: int | None = None
 
 
 class OutingCreate(OutingBase):
@@ -55,6 +58,8 @@ class OutingOut(OutingBase):
     height_diff_m: int | None = None
     alt_gain_m: int | None = None
     has_project: bool = False
+    buddy_ids: list[int] = []
+    buddy_names: list[str] = []
 
 
 def serialize_outing(o: Outing) -> OutingOut:
@@ -72,9 +77,14 @@ def serialize_outing(o: Outing) -> OutingOut:
         category=o.category,
         launch_type=o.launch_type,
         comment=o.comment,
+        climb_m=o.climb_m,
+        hike_distance_km=o.hike_distance_km,
+        hike_duration_min=o.hike_duration_min,
         launch_site_name=o.launch_site.name if o.launch_site else None,
         landing_site_name=o.landing_site.name if o.landing_site else None,
         height_diff_m=metrics["height_diff_m"],
         alt_gain_m=metrics["alt_gain_m"],
         has_project=o.project is not None,
+        buddy_ids=[b.id for b in o.buddies],
+        buddy_names=[b.name for b in o.buddies],
     )
