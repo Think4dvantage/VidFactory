@@ -99,6 +99,12 @@ buddies CRUD `POST /api/flightlog/buddies[/{id}/delete]` · IGC `POST /api/fligh
 > Multi-flight/multi-file days, no-outing, and already-tracked dates are reported for manual upload
 > (outings carry no clock time, so same-day multiples can't be auto-matched). Tune
 > `libigc.FlightParsingConfig` if paraglider thermals are still mis-detected.
+>
+> **Duplicates:** the `pg/igc` library mixes device files (`*-XTR-*.IGC`) and XContest downloads; the
+> same flight can appear twice. Files are matched as the same flight by date + >50% B-record time-window
+> overlap. Redundant device dupes are staged in `pg/igc/.device_dupes/` (hidden from the non-recursive
+> `*.igc` glob, reversible); device-only flights with no XContest twin are kept. `igc_tracks.file` is the
+> single linked source per outing; deleting a track unlinks + removes that file (`missing_ok`).
 
 **projects** — `GET /projects/by-outing/{outing_id}` (create+redirect) · `GET /projects/{id}` page ·
 `GET /projects/{id}/editor` page · flight-type/parts(add,move,delete)/hike mutations ·
