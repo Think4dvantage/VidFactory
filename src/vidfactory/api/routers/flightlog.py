@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import math
 import tempfile
 
 from fastapi import APIRouter, Depends, Request, UploadFile
@@ -18,6 +19,53 @@ from vidfactory.models.flightlog import SiteOut, serialize_outing
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+PAGE_SIZE = 50
+
+
+def _parse_filters(request: Request) -> dict:
+    """Pull the (validated) filter / sort / page state out of the query string."""
+    q = request.query_params
+
+    def _pos_int(name: str) -> int | None:
+        v = q.get(name, "").strip()
+        return int(v) if v.isdigit() else None
+
+    sort = q.get("sort", "date")
+    sort = sort if sort in flightlog.SORTABLE else "date"
+    direction = q.get("direction", "desc")
+    direction = direction if direction in ("asc", "desc") else "desc"
+    return {
+        "search": q.get("search", "").strip() or None,
+        "year": _pos_int("year"),
+        "category": q.get("category", "").strip() or None,
+        "glider": q.get("glider", "").strip() or None,
+        "site_id": _pos_int("site_id"),
+        "sort": sort,
+        "direction": direction,
+        "page": max(1, _pos_int("page") or 1),
+    }
+
+
+def _table_context(db: Session, request: Request) -> dict:
+    """Filtered + paginated outings plus the state the table partial echoes back."""
+    f = _parse_filters(request)
+    filters = {k: f[k] for k in ("search", "year", "category", "glider", "site_id")}
+    total = flightlog.count_outings(db, **filters)
+    pages = max(1, math.ceil(total / PAGE_SIZE))
+    page = min(f["page"], pages)
+    rows = flightlog.list_outings(
+        db, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE,
+        sort=f["sort"], direction=f["direction"], **filters,
+    )
+    f["page"] = page
+    return {
+        "outings": [serialize_outing(o) for o in rows],
+        "total": total,
+        "pages": pages,
+        "page_size": PAGE_SIZE,
+        "f": f,
+    }
 
 _OUTING_FIELDS = (
     "date", "launch_site_id", "landing_site_id", "glider", "harness",
@@ -53,16 +101,21 @@ def _redirect() -> Response:
 
 @router.get("/flightlog", include_in_schema=False)
 def flightlog_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse(
-        request,
-        "flightlog.html",
-        {
-            "stats": flightlog.stats(db),
-            "outings": [serialize_outing(o) for o in flightlog.list_outings(db, limit=200)],
-            "launch_sites": sites.list_sites(db, "launch"),
-            "landing_sites": sites.list_sites(db, "landing"),
-        },
-    )
+    ctx = {
+        "stats": flightlog.stats(db),
+        "options": flightlog.filter_options(db),
+        "launch_sites": sites.list_sites(db, "launch"),
+        "landing_sites": sites.list_sites(db, "landing"),
+    }
+    ctx.update(_table_context(db, request))
+    return templates.TemplateResponse(request, "flightlog.html", ctx)
+
+
+@router.get("/api/flightlog/outings/table", include_in_schema=False)
+def outings_table(request: Request, db: Session = Depends(get_db)):
+    ctx = _table_context(db, request)
+    ctx["options"] = flightlog.filter_options(db)
+    return templates.TemplateResponse(request, "partials/outings_table.html", ctx)
 
 
 @router.get("/api/flightlog/outings/{outing_id}/form", include_in_schema=False)
@@ -138,5 +191,5 @@ def sites_json(kind: str | None = None, db: Session = Depends(get_db)):
 
 @router.get("/api/flightlog/outings")
 def outings_json(limit: int = 200, offset: int = 0, db: Session = Depends(get_db)):
-    rows = [serialize_outing(o) for o in flightlog.list_outings(db, limit, offset)]
+    rows = [serialize_outing(o) for o in flightlog.list_outings(db, limit=limit, offset=offset)]
     return {"data": rows, "total": len(rows)}

@@ -1,0 +1,126 @@
+{# Filter bar + outings table + pagination. Swapped wholesale into #outings-panel.
+   `f` = current filter/sort/page state; `options` = dropdown values. #}
+
+{%- macro qs(f, over={}) -%}
+{%- set ns = namespace(parts=[]) -%}
+{%- for k in ['search','year','category','glider','site_id','sort','direction','page'] -%}
+  {%- set v = over[k] if k in over else f.get(k) -%}
+  {%- if v is not none and v|string != '' -%}
+    {%- set ns.parts = ns.parts + [k ~ '=' ~ (v|string|urlencode)] -%}
+  {%- endif -%}
+{%- endfor -%}
+?{{ ns.parts | join('&') }}
+{%- endmacro -%}
+
+{%- macro sorth(f, key, label, align='left') -%}
+{%- set active = (f.sort == key) -%}
+{%- set newdir = 'asc' if (active and f.direction == 'desc') else 'desc' -%}
+<th class="text-{{ align }} px-3 py-2">
+  <button hx-get="/api/flightlog/outings/table{{ qs(f, {'sort': key, 'direction': newdir, 'page': 1}) }}"
+          hx-target="#outings-panel" hx-swap="innerHTML"
+          class="uppercase hover:text-white {{ 'text-sky-300' if active else '' }}">
+    {{ label }}{% if active %}<span class="ml-0.5">{{ '▾' if f.direction == 'desc' else '▴' }}</span>{% endif %}
+  </button>
+</th>
+{%- endmacro -%}
+
+<form hx-get="/api/flightlog/outings/table" hx-target="#outings-panel" hx-swap="innerHTML"
+      hx-trigger="change, keyup changed delay:350ms"
+      class="flex flex-wrap items-end gap-2 mb-3 text-sm">
+  <input type="hidden" name="sort" value="{{ f.sort }}">
+  <input type="hidden" name="direction" value="{{ f.direction }}">
+  <label class="flex flex-col grow min-w-[12rem]">
+    <span class="text-xs text-slate-400 mb-0.5">Search</span>
+    <input type="search" name="search" value="{{ f.search or '' }}" placeholder="site, glider, harness, comment…"
+           class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+  </label>
+  <label class="flex flex-col">
+    <span class="text-xs text-slate-400 mb-0.5">Year</span>
+    <select name="year" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <option value="">All</option>
+      {% for y in options.years %}<option value="{{ y }}" {% if f.year == y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="flex flex-col">
+    <span class="text-xs text-slate-400 mb-0.5">Category</span>
+    <select name="category" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <option value="">All</option>
+      {% for c in options.categories %}<option value="{{ c }}" {% if f.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="flex flex-col">
+    <span class="text-xs text-slate-400 mb-0.5">Glider</span>
+    <select name="glider" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <option value="">All</option>
+      {% for g in options.gliders %}<option value="{{ g }}" {% if f.glider == g %}selected{% endif %}>{{ g }}</option>{% endfor %}
+    </select>
+  </label>
+  {% if f.search or f.year or f.category or f.glider or f.site_id %}
+  <a href="/flightlog" class="rounded bg-slate-700 hover:bg-slate-600 px-3 py-1">Clear</a>
+  {% endif %}
+</form>
+
+<div class="overflow-x-auto rounded-lg border border-slate-700 bg-slate-800">
+  <table class="w-full text-sm">
+    <thead class="text-slate-400 text-xs">
+      <tr class="border-b border-slate-700">
+        {{ sorth(f, 'date', 'Date') }}
+        <th class="text-left px-3 py-2 uppercase">Launch → Landing</th>
+        <th class="text-left px-3 py-2 uppercase">Category</th>
+        {{ sorth(f, 'flight_time_min', 'Min', 'right') }}
+        {{ sorth(f, 'distance_km', 'km', 'right') }}
+        {{ sorth(f, 'max_alt_m', 'Max alt', 'right') }}
+        <th class="text-right px-3 py-2 uppercase">Gain</th>
+        <th class="text-left px-3 py-2 uppercase">Glider</th>
+        <th class="text-left px-3 py-2 uppercase">Harness</th>
+        <th class="px-3 py-2"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in outings %}
+      <tr class="border-b border-slate-700/50 hover:bg-slate-700/30" {% if o.comment %}title="{{ o.comment }}"{% endif %}>
+        <td class="px-3 py-1 whitespace-nowrap">{{ o.date }}</td>
+        <td class="px-3 py-1">{{ o.launch_site_name or '—' }} → {{ o.landing_site_name or '—' }}</td>
+        <td class="px-3 py-1">{{ o.category or '' }}</td>
+        <td class="px-3 py-1 text-right">{{ o.flight_time_min if o.flight_time_min is not none else '' }}</td>
+        <td class="px-3 py-1 text-right">{{ o.distance_km if o.distance_km is not none else '' }}</td>
+        <td class="px-3 py-1 text-right">{{ o.max_alt_m if o.max_alt_m is not none else '' }}</td>
+        <td class="px-3 py-1 text-right text-slate-400">{{ o.alt_gain_m if o.alt_gain_m is not none else '' }}</td>
+        <td class="px-3 py-1 text-slate-400">{{ o.glider or '' }}</td>
+        <td class="px-3 py-1 text-slate-400">{{ o.harness or '' }}</td>
+        <td class="px-3 py-1 text-right whitespace-nowrap">
+          <a class="text-emerald-300 hover:underline" href="/projects/by-outing/{{ o.id }}">{{ '🎬' if o.has_project else '+ video' }}</a>
+          <button class="text-sky-300 hover:underline ml-2"
+                  hx-get="/api/flightlog/outings/{{ o.id }}/form" hx-target="#outing-form-panel" hx-swap="innerHTML"
+                  onclick="window.scrollTo({top:0,behavior:'smooth'})">edit</button>
+          <button class="text-rose-400 hover:underline ml-2"
+                  hx-post="/api/flightlog/outings/{{ o.id }}/delete"
+                  hx-confirm="Delete this outing?">del</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if not outings %}<p class="p-3 text-slate-400 text-sm">No outings match — adjust the filters, import Flugbuch.xlsx, or add one above.</p>{% endif %}
+</div>
+
+<div class="flex items-center justify-between mt-3 text-sm text-slate-400">
+  <span>
+    {% if total %}
+    Showing {{ (f.page - 1) * page_size + 1 }}–{{ [f.page * page_size, total] | min }} of {{ total }}
+    {% else %}No flights{% endif %}
+  </span>
+  {% if pages > 1 %}
+  <div class="flex items-center gap-2">
+    <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1 disabled:opacity-40"
+            {% if f.page <= 1 %}disabled{% endif %}
+            hx-get="/api/flightlog/outings/table{{ qs(f, {'page': f.page - 1}) }}"
+            hx-target="#outings-panel" hx-swap="innerHTML">‹ Prev</button>
+    <span class="text-slate-500">Page {{ f.page }} / {{ pages }}</span>
+    <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1 disabled:opacity-40"
+            {% if f.page >= pages %}disabled{% endif %}
+            hx-get="/api/flightlog/outings/table{{ qs(f, {'page': f.page + 1}) }}"
+            hx-target="#outings-panel" hx-swap="innerHTML">Next ›</button>
+  </div>
+  {% endif %}
+</div>

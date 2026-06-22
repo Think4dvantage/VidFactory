@@ -22,6 +22,24 @@
       <div class="flex justify-between"><dt class="text-slate-400">Distance (km)</dt><dd>{{ stats.total_distance_km }}</dd></div>
     </dl>
   </section>
+
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Records</h2>
+    {% set rec = stats.records %}
+    <dl class="text-sm space-y-1">
+      {% macro recrow(label, r, unit, prefix='') %}
+      <div class="flex justify-between gap-2">
+        <dt class="text-slate-400">{{ label }}</dt>
+        <dd class="text-right">{% if r %}{{ prefix }}{{ r.value }} {{ unit }}<span class="block text-xs text-slate-500">{{ r.date }}</span>{% else %}—{% endif %}</dd>
+      </div>
+      {% endmacro %}
+      {{ recrow('Longest', rec.longest, 'min') }}
+      {{ recrow('Farthest', rec.farthest, 'km') }}
+      {{ recrow('Highest', rec.highest, 'm') }}
+      {{ recrow('Max gain', rec.gain, 'm', '+') }}
+    </dl>
+  </section>
+
   <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Top launches</h2>
     <ol class="text-sm space-y-0.5">
@@ -30,6 +48,7 @@
       {% endfor %}
     </ol>
   </section>
+
   <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Top landings</h2>
     <ol class="text-sm space-y-0.5">
@@ -38,6 +57,7 @@
       {% endfor %}
     </ol>
   </section>
+
   <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Seasonality</h2>
     {% set maxm = (stats.by_month.values() | list | max) if stats.by_month else 1 %}
@@ -53,6 +73,29 @@
       {% endfor %}
     </div>
   </section>
+
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 lg:col-span-2">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">By year</h2>
+    {% set maxy = (stats.by_year.values() | list | max) if stats.by_year else 1 %}
+    <div class="space-y-0.5 text-xs">
+      {% for yr, c in stats.by_year.items() | sort(reverse=true) %}
+      <div class="flex items-center gap-2">
+        <a href="/flightlog?year={{ yr }}" class="w-10 text-slate-400 hover:text-sky-300">{{ yr }}</a>
+        <span class="bg-emerald-700 h-2 rounded" style="width: {{ (c / maxy * 100) | round }}%"></span>
+        <span class="text-slate-500">{{ c }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">By category</h2>
+    <ol class="text-sm space-y-0.5">
+      {% for name, n in stats.by_category[:8] %}
+      <li class="flex justify-between"><span>{{ name }}</span><span class="text-slate-400">{{ n }}</span></li>
+      {% endfor %}
+    </ol>
+  </section>
 </div>
 
 <!-- Add / Edit form -->
@@ -66,46 +109,8 @@
   </div>
 </section>
 
-<!-- Outings table -->
-<section class="rounded-lg border border-slate-700 bg-slate-800 overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead class="text-slate-400 text-xs uppercase">
-      <tr class="border-b border-slate-700">
-        <th class="text-left px-3 py-2">Date</th>
-        <th class="text-left px-3 py-2">Launch → Landing</th>
-        <th class="text-left px-3 py-2">Category</th>
-        <th class="text-right px-3 py-2">Min</th>
-        <th class="text-right px-3 py-2">km</th>
-        <th class="text-right px-3 py-2">Max alt</th>
-        <th class="text-right px-3 py-2">Gain</th>
-        <th class="text-left px-3 py-2">Glider</th>
-        <th class="px-3 py-2"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for o in outings %}
-      <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
-        <td class="px-3 py-1 whitespace-nowrap">{{ o.date }}</td>
-        <td class="px-3 py-1">{{ o.launch_site_name or '—' }} → {{ o.landing_site_name or '—' }}</td>
-        <td class="px-3 py-1">{{ o.category or '' }}</td>
-        <td class="px-3 py-1 text-right">{{ o.flight_time_min if o.flight_time_min is not none else '' }}</td>
-        <td class="px-3 py-1 text-right">{{ o.distance_km if o.distance_km is not none else '' }}</td>
-        <td class="px-3 py-1 text-right">{{ o.max_alt_m if o.max_alt_m is not none else '' }}</td>
-        <td class="px-3 py-1 text-right text-slate-400">{{ o.alt_gain_m if o.alt_gain_m is not none else '' }}</td>
-        <td class="px-3 py-1 text-slate-400">{{ o.glider or '' }}</td>
-        <td class="px-3 py-1 text-right whitespace-nowrap">
-          <a class="text-emerald-300 hover:underline" href="/projects/by-outing/{{ o.id }}">{{ '🎬' if o.has_project else '+ video' }}</a>
-          <button class="text-sky-300 hover:underline ml-2"
-                  hx-get="/api/flightlog/outings/{{ o.id }}/form" hx-target="#outing-form-panel" hx-swap="innerHTML"
-                  onclick="window.scrollTo({top:0,behavior:'smooth'})">edit</button>
-          <button class="text-rose-400 hover:underline ml-2"
-                  hx-post="/api/flightlog/outings/{{ o.id }}/delete"
-                  hx-confirm="Delete this outing?">del</button>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% if not outings %}<p class="p-3 text-slate-400 text-sm">No outings yet — import Flugbuch.xlsx or add one above.</p>{% endif %}
-</section>
+<!-- Outings table (filter bar + table + pagination; swapped via HTMX) -->
+<div id="outings-panel">
+  {% include "partials/outings_table.html" %}
+</div>
 {% endblock %}
