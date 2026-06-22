@@ -19,6 +19,7 @@
 | M3 | Highlights + Summary: highlight editor (range-streamed full flight, IN/OUT marks, names/roles/flags, timeline), `merge_overlaps` + `auto_fill`, single-pass filter_complex summary (drawtext overlays via textfile, picture highlights, NVENC), music service (folder/file, loudnorm bed, credits), full-flight-with-music (stream-copy + amix). **Verified live**: 20260502 → `Summary.mp4` (60s, overlays+music+credits) and `FullFlight_withMusic.mp4` (6.9GB). |
 
 | M4 | Shorts: highlight-driven (hook→launch?→flying→landing?→CTA, capped <30 s, titled from highlight) + random-pool batch with `UsedMap` de-dup; vertical 1080×1920 normalize (centre-crop), CTA end screen (drawtext), per-short music; NVENC; history in DB. **Verified live**: highlight short 26.0s (hook+launch+3 flying+landing+CTA) and 2 random shorts with no shared flying footage. |
+| M1+ | Flight-log polish: search/year/category/glider filters + sortable columns + pagination (`partials/outings_table.html`); stats gained records + by-year + by-category cards; 2-line rows (stats + comment). Managed dropdowns via a `lookups` table (migration 0003, seeded from existing data) editable in a "Manage Dropdown Data" modal; `launch_type` normalised `f/F→forward`, `r→reverse`. xlsx-import button replaced by **CSV export** (`importer` stays a CLI path). **Verified live.** |
 
 ### Roadmap (ordered, not yet shipped)
 
@@ -33,10 +34,14 @@
   SMB-only, so it needs CIFS credentials). Until mounted, `/data/{InstaOut,Music,Summaries,Shorts}`
   are missing and `/health` reports `degraded` (still HTTP 200; the app stays reachable). `Archive`
   works because the app creates it on local disk.
-- **NVIDIA NVENC — FIXED.** The CDI spec was stale after a driver update (referenced `580.95.05`);
-  regenerated with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`. Dev compose uses the
-  CDI device `nvidia.com/gpu=all`; the app now selects `h264_nvenc`. Re-run the regenerate command on
-  the host after any driver update.
+- **NVIDIA NVENC — host-side fragile in two distinct ways:**
+  1. After a **driver update** the CDI spec goes stale; regenerate it:
+     `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`.
+  2. After a **plain reboot** the `nvidia_uvm` module loads lazily, so `/dev/nvidia-uvm` is missing and
+     the container fails to start with `CDI device injection failed … "/dev/nvidia-uvm": no such file or
+     directory` — even though `nvidia-smi` works (base modules loaded, UVM not). Fix:
+     `sudo modprobe nvidia_uvm && sudo nvidia-modprobe -u -c=0` (then regenerate the CDI spec).
+  Dev compose uses the CDI device `nvidia.com/gpu=all`; the app selects `h264_nvenc`.
 
 ## Backlog (unordered)
 

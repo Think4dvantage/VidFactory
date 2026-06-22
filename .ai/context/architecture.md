@@ -28,8 +28,10 @@ chapters, and named-short sources. `launch` and `landing` are just Highlights wi
 
 **Migrations:** no Alembic. Per `02-backend-conventions.md`, schema changes are sequential idempotent
 `.sql` files in `database/migrations/` (`0001_initial_schema.sql`, …), applied by `db.py:init_db()`
-and tracked in a `_migrations` table; SQLite runs in WAL mode. The DB file lives on the `Archive/`
-mount (`/data/Archive/vidfactory.db`).
+and tracked in a `_migrations` table; SQLite runs in WAL mode. The DB file is `vidfactory.db` on the
+**local `vf_data` docker volume** (`VF_DATA_DIR=/app/data` → `/app/data/vidfactory.db`), never on the
+NAS — WAL is unsafe over NFS/SMB (see Storage & mounts below). NB: a stale legacy copy may linger at
+`/data/Archive/vidfactory.db` on the host; the app does **not** use it — always inspect `/app/data`.
 
 ---
 
