@@ -33,12 +33,13 @@ def analyze(path: str) -> dict:
     if not flight.valid:
         raise IgcError("; ".join(flight.notes) if flight.notes else "invalid IGC file")
 
-    thermals = flight.thermals
     glides = flight.glides
 
-    # Climbs: only positive altitude changes count toward cumulative climb.
-    gains = [max(0.0, t.alt_change()) for t in thermals]
-    total_climb = sum(gains)
+    # libigc flags *any* circling as a "thermal" — including descending spirals and wingovers,
+    # which are common in paragliding. A thermal is circling that actually gains height, so we
+    # count only climbing circles. This keeps best/avg climb positive and the count meaningful.
+    thermals = [t for t in flight.thermals if t.alt_change() > 0]
+    total_climb = sum(t.alt_change() for t in thermals)
     thermal_seconds = sum(t.time_change() for t in thermals)
     climb_rates = [t.vertical_velocity() for t in thermals if t.time_change() > 0]
 
