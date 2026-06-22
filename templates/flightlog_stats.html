@@ -181,6 +181,47 @@
   {% endif %}
 </section>
 
+<!-- Climbs from IGC tracks -->
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mb-6">
+  <h2 class="text-sm uppercase tracking-wide text-slate-400 mb-1">Climbs by year <span class="text-slate-500 normal-case">(from IGC tracks)</span></h2>
+  <p class="text-xs text-slate-500 mb-3">{{ igc.overall.flights }} analyzed tracks ·
+    {{ igc.overall.thermal_count }} thermals · <span class="text-emerald-300">{{ igc.overall.total_climb_m }} m</span>
+    climbed cumulatively{% if igc.overall.best_climb_ms %} · best {{ igc.overall.best_climb_ms }} m/s{% endif %}</p>
+  {% if igc.overall.flights %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-slate-400 text-xs uppercase">
+        <tr class="border-b border-slate-700">
+          <th class="text-left px-3 py-2">Year</th>
+          <th class="text-right px-3 py-2">Tracks</th>
+          <th class="text-right px-3 py-2">Thermals</th>
+          <th class="text-right px-3 py-2">Avg/flight</th>
+          <th class="text-right px-3 py-2">Total climb (m)</th>
+          <th class="text-right px-3 py-2">Best climb (m/s)</th>
+          <th class="text-right px-3 py-2">Avg climb (m/s)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in igc.per_year %}
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+          <td class="px-3 py-1">{{ r.year }}</td>
+          <td class="px-3 py-1 text-right">{{ r.flights }}</td>
+          <td class="px-3 py-1 text-right">{{ r.thermal_count }}</td>
+          <td class="px-3 py-1 text-right text-slate-400">{{ r.avg_thermals }}</td>
+          <td class="px-3 py-1 text-right text-emerald-300">{{ r.total_climb_m }}</td>
+          <td class="px-3 py-1 text-right">{{ r.best_climb_ms or '—' }}</td>
+          <td class="px-3 py-1 text-right text-slate-400">{{ r.avg_climb_ms or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm">No IGC tracks analyzed yet — upload an IGC on an outing (edit → IGC track)
+    and its climbs roll up here.</p>
+  {% endif %}
+</section>
+
 <!-- Hike & Fly -->
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mb-6">
   <h2 class="text-sm uppercase tracking-wide text-slate-400 mb-1">Hike &amp; Fly by year</h2>

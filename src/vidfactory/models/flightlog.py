@@ -51,6 +51,20 @@ class OutingUpdate(BaseModel):
     comment: str | None = None
 
 
+class IgcOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    file: str
+    duration_s: int | None = None
+    max_alt_m: int | None = None
+    thermal_count: int = 0
+    total_climb_m: int = 0
+    best_climb_ms: float | None = None
+    avg_climb_ms: float | None = None
+    glide_count: int = 0
+    total_glide_km: float | None = None
+    glide_ratio: float | None = None
+
+
 class OutingOut(OutingBase):
     id: int
     launch_site_name: str | None = None
@@ -60,6 +74,7 @@ class OutingOut(OutingBase):
     has_project: bool = False
     buddy_ids: list[int] = []
     buddy_names: list[str] = []
+    igc: IgcOut | None = None
 
 
 def serialize_outing(o: Outing) -> OutingOut:
@@ -87,4 +102,5 @@ def serialize_outing(o: Outing) -> OutingOut:
         has_project=o.project is not None,
         buddy_ids=[b.id for b in o.buddies],
         buddy_names=[b.name for b in o.buddies],
+        igc=IgcOut.model_validate(o.igc_track) if o.igc_track else None,
     )

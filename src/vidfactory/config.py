@@ -25,6 +25,7 @@ class MountsSection(BaseModel):
     output_summaries: str = "/data/summaries"
     output_shorts: str = "/data/shorts"
     archive: str = "/data/Archive"
+    igc: str = "/data/igc"
 
 
 class EncodeSection(BaseModel):
@@ -84,10 +85,11 @@ class Config(BaseModel):
             "output_summaries": Path(self.mounts.output_summaries),
             "output_shorts": Path(self.mounts.output_shorts),
             "archive": Path(self.mounts.archive),
+            "igc": Path(self.mounts.igc),
         }
 
     def writable_roots(self) -> set[str]:
-        return {"output_fullflights", "output_summaries", "output_shorts", "archive"}
+        return {"output_fullflights", "output_summaries", "output_shorts", "archive", "igc"}
 
 
 # Environment overrides for the storage roots (handy in docker-compose / .env).
@@ -98,6 +100,7 @@ _ENV_MOUNT_KEYS = {
     "output_summaries": "VF_OUTPUT_SUMMARIES",
     "output_shorts": "VF_OUTPUT_SHORTS",
     "archive": "VF_ARCHIVE",
+    "igc": "VF_IGC",
 }
 
 CONFIG_PATH = Path(os.environ.get("VF_CONFIG", "config.yml"))

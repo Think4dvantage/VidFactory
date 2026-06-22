@@ -78,7 +78,7 @@
     </thead>
     <tbody>
       {% for o in outings %}
-      {% set has_detail = o.comment or o.buddy_names %}
+      {% set has_detail = o.comment or o.buddy_names or o.igc %}
       <tr class="hover:bg-slate-700/30 {% if not has_detail %}border-b border-slate-700/50{% endif %}">
         <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} whitespace-nowrap">{{ o.date }}</td>
         <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %}">{{ o.launch_site_name or '—' }} → {{ o.landing_site_name or '—' }}</td>
@@ -103,8 +103,9 @@
       <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
         <td></td>
         <td colspan="9" class="px-3 pb-2 pt-0 text-xs">
-          {% if o.buddy_names %}<span class="text-sky-300">👥 {{ o.buddy_names | join(', ') }}</span>{% endif %}
-          {% if o.comment %}<span class="text-slate-400 italic {% if o.buddy_names %}ml-3{% endif %}">💬 {{ o.comment }}</span>{% endif %}
+          {% if o.igc %}<span class="text-emerald-300" title="cumulative climb across {{ o.igc.thermal_count }} thermals">🌀 {{ o.igc.thermal_count }} thermals · ↑{{ o.igc.total_climb_m }} m</span>{% endif %}
+          {% if o.buddy_names %}<span class="text-sky-300 {% if o.igc %}ml-3{% endif %}">👥 {{ o.buddy_names | join(', ') }}</span>{% endif %}
+          {% if o.comment %}<span class="text-slate-400 italic {% if o.igc or o.buddy_names %}ml-3{% endif %}">💬 {{ o.comment }}</span>{% endif %}
         </td>
       </tr>
       {% endif %}

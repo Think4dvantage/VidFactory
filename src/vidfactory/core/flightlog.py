@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
-from vidfactory.database.models import Buddy, Outing, Site, outing_buddies
+from vidfactory.database.models import Buddy, IgcTrack, Outing, Site, outing_buddies
 
 # Category value that marks a Hike & Fly outing (seeded into lookups).
 HIKEFLY_CATEGORY = "Hike&Fly"
@@ -82,6 +82,7 @@ def list_outings(
             selectinload(Outing.landing_site),
             selectinload(Outing.project),
             selectinload(Outing.buddies),
+            selectinload(Outing.igc_track),
         )
         .order_by(order, Outing.id.desc())
         .offset(offset)
@@ -104,6 +105,7 @@ def get_outing(db: Session, outing_id: int) -> Outing | None:
             selectinload(Outing.launch_site),
             selectinload(Outing.landing_site),
             selectinload(Outing.buddies),
+            selectinload(Outing.igc_track),
         )
         .where(Outing.id == outing_id)
     ).scalar_one_or_none()
@@ -359,5 +361,50 @@ def hikefly_stats(db: Session) -> dict:
         "climb_m": int(tot[1]) if tot[1] else 0,
         "distance_km": round(tot[2], 1) if tot[2] else 0,
         "duration_min": int(tot[3]) if tot[3] else 0,
+    }
+    return {"per_year": per_year, "overall": overall}
+
+
+def igc_summary(db: Session) -> dict:
+    """Climb stats from analyzed IGC tracks: flights, cumulative climb, thermals — per year + overall."""
+    rows = db.execute(
+        select(
+            func.strftime("%Y", Outing.date),
+            func.count(IgcTrack.id),
+            func.sum(IgcTrack.total_climb_m),
+            func.sum(IgcTrack.thermal_count),
+            func.max(IgcTrack.best_climb_ms),
+            func.avg(IgcTrack.avg_climb_ms),
+        )
+        .select_from(IgcTrack)
+        .join(Outing, Outing.id == IgcTrack.outing_id)
+        .group_by(func.strftime("%Y", Outing.date))
+    ).all()
+    per_year = []
+    for y, cnt, climb, thermals, best, avg in sorted(
+        (r for r in rows if r[0]), key=lambda r: r[0], reverse=True
+    ):
+        per_year.append({
+            "year": int(y),
+            "flights": cnt,
+            "total_climb_m": int(climb) if climb else 0,
+            "thermal_count": int(thermals) if thermals else 0,
+            "avg_thermals": round(thermals / cnt, 1) if cnt else 0,
+            "best_climb_ms": round(best, 2) if best else None,
+            "avg_climb_ms": round(avg, 2) if avg else None,
+        })
+    tot = db.execute(
+        select(
+            func.count(IgcTrack.id),
+            func.sum(IgcTrack.total_climb_m),
+            func.sum(IgcTrack.thermal_count),
+            func.max(IgcTrack.best_climb_ms),
+        )
+    ).first()
+    overall = {
+        "flights": tot[0] or 0,
+        "total_climb_m": int(tot[1]) if tot[1] else 0,
+        "thermal_count": int(tot[2]) if tot[2] else 0,
+        "best_climb_ms": round(tot[3], 2) if tot[3] else None,
     }
     return {"per_year": per_year, "overall": overall}

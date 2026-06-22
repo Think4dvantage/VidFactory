@@ -21,6 +21,7 @@ chapters, and named-short sources. `launch` and `landing` are just Highlights wi
 | `outings` | `id`, `date`, `launch_site_id→sites`, `landing_site_id→sites`, `glider`, `harness`, `flight_time_min`, `distance_km`, `max_alt_m`, `category`, `launch_type`, `comment`, `climb_m`, `hike_distance_km`, `hike_duration_min` | replaces the Flugbuch sheet; **598 rows imported**. `height_diff` & `alt_gain` are **derived** (max_alt − landing_elev / max_alt − launch_elev), not stored. `launch_type` is `forward`/`reverse` (normalised from legacy `f`/`r`). The three `*hike*`/`climb_m` columns are Hike&Fly-only metrics. |
 | `lookups` | `id`, `kind`('category'\|'glider'\|'harness'\|'launch_type'), `value`, `sort_order` | managed dropdown values for the outing form (migration 0003, seeded from existing data) |
 | `buddies` + `outing_buddies` | `buddies(id,name,sort_order)`; join `outing_buddies(outing_id,buddy_id)` | people the user flies with; multiselect per outing (migration 0004). ORM `secondary` relationship handles cleanup on single deletes; importer clears the join on `replace` |
+| `igc_tracks` | `id`, `outing_id→outings`(unique), `file`, `analyzed_at`, `takeoff_at`, `landing_at`, `duration_s`, `max_alt_m`, `thermal_count`, `total_climb_m`, `best_climb_ms`, `avg_climb_ms`, `glide_count`, `total_glide_km`, `glide_ratio` | 0..1 per outing (migration 0005). Aggregates derived from the uploaded IGC by `core/igc.py` (libigc). `total_climb_m` = **cumulative** climb across all thermals (≠ max−launch). `glide_ratio` = achieved over-ground glide. `cascade=delete-orphan` |
 | `projects` | `id`, `outing_id→outings` (unique, nullable), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | 0..1 per outing |
 | `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw Insta360 ~30-min parts, user-orderable |
 | `hikes` | `id`, `project_id→projects`, `sources`(json list), `speed_factor`(default 32.0) | H&F only; sped up and prepended to the full flight |
@@ -86,8 +87,13 @@ builds return `{job_id}` and stream progress over SSE. Routers under `api/router
 `GET /flightlog/stats` page (year-comparison matrices: category×year, launch-type+reverse-%, buddy×year, Hike&Fly) ·
 `GET /api/flightlog/outings/table` (HTMX table partial) · `GET/POST /api/flightlog/outings[/{id}[/delete]]` ·
 `GET /api/flightlog/outings/{new|id}/form` · lookups CRUD `GET/POST /api/flightlog/lookups[/{id}/delete]` ·
-buddies CRUD `POST /api/flightlog/buddies[/{id}/delete]` · `GET /api/flightlog/export.csv` ·
+buddies CRUD `POST /api/flightlog/buddies[/{id}/delete]` · IGC `POST /api/flightlog/outings/{id}/igc[/delete]`
+(multipart upload → `core/igc.py` analyze → `igc_tracks`) · `GET /api/flightlog/export.csv` ·
 `GET /api/flightlog/{stats,sites,outings}` (JSON). (xlsx import is CLI-only: `python -m vidfactory.core.importer`.)
+
+> **IGC analysis** (`core/igc.py`) uses **libigc** (pip dep — adding it needs a Docker image **rebuild**,
+> not just a bind-mount sync). Per-outing upload only so far; bulk date/time matching of the `pg/igc`
+> library is a future phase. Tune `libigc.FlightParsingConfig` if paraglider thermals are mis-detected.
 
 **projects** — `GET /projects/by-outing/{outing_id}` (create+redirect) · `GET /projects/{id}` page ·
 `GET /projects/{id}/editor` page · flight-type/parts(add,move,delete)/hike mutations ·
@@ -115,6 +121,7 @@ container at `/data`. Roots are env-configurable; actual folder names on the sha
 | `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + full-flight-with-music + credits (write) |
 | `VF_OUTPUT_SHORTS` | `/data/shorts` | shorts (write) |
 | `VF_ARCHIVE` | `/data/Archive` | metadata.json + credits (write) |
+| `VF_IGC` | `/data/igc` | uploaded IGC tracks (write); on the `pg` share at `\\…\pg\igc` |
 | (full flights) | `/data/fullflights` | concat output (wired in M2) |
 
 **The SQLite DB lives on a LOCAL docker volume** (`VF_DATA_DIR=/app/data`, volume `vf_data`), **not on

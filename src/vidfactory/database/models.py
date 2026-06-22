@@ -77,6 +77,38 @@ class Outing(Base):
     landing_site: Mapped[Site | None] = relationship(foreign_keys=[landing_site_id])
     project: Mapped["Project | None"] = relationship(back_populates="outing", uselist=False)
     buddies: Mapped[list[Buddy]] = relationship(secondary=outing_buddies, order_by="Buddy.name")
+    igc_track: Mapped["IgcTrack | None"] = relationship(
+        back_populates="outing", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class IgcTrack(Base):
+    """Aggregate stats derived from an outing's IGC track (one per outing)."""
+
+    __tablename__ = "igc_tracks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    outing_id: Mapped[int] = mapped_column(
+        ForeignKey("outings.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    file: Mapped[str] = mapped_column(String, nullable=False)  # path under the igc root
+    analyzed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Flight extent
+    takeoff_at: Mapped[datetime | None] = mapped_column(DateTime)
+    landing_at: Mapped[datetime | None] = mapped_column(DateTime)
+    duration_s: Mapped[int | None] = mapped_column(Integer)
+    max_alt_m: Mapped[int | None] = mapped_column(Integer)
+    # Climbs / thermals
+    thermal_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_climb_m: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    best_climb_ms: Mapped[float | None] = mapped_column(Float)
+    avg_climb_ms: Mapped[float | None] = mapped_column(Float)
+    # Glides
+    glide_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_glide_km: Mapped[float | None] = mapped_column(Float)
+    glide_ratio: Mapped[float | None] = mapped_column(Float)
+
+    outing: Mapped[Outing] = relationship(back_populates="igc_track")
 
 
 class Project(Base):

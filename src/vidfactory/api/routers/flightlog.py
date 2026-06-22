@@ -5,15 +5,17 @@ import datetime
 import io
 import logging
 import math
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
-from vidfactory.core import buddies, flightlog, lookups, sites
+from vidfactory.config import get_config
+from vidfactory.core import buddies, flightlog, igc, lookups, sites
 from vidfactory.database.db import get_db
-from vidfactory.database.models import Outing
+from vidfactory.database.models import IgcTrack, Outing
 from vidfactory.models.flightlog import SiteOut, serialize_outing
 
 logger = logging.getLogger(__name__)
@@ -132,6 +134,7 @@ def flightlog_stats_page(request: Request, db: Session = Depends(get_db)):
             "launch_type": flightlog.launch_type_year(db),
             "buddy_matrix": flightlog.buddy_year_matrix(db),
             "hikefly": flightlog.hikefly_stats(db),
+            "igc": flightlog.igc_summary(db),
         },
     )
 
@@ -143,7 +146,7 @@ def outings_table(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "partials/outings_table.html", ctx)
 
 
-def _form_context(db: Session, outing) -> dict:
+def _form_context(db: Session, outing, igc_error: str | None = None) -> dict:
     return {
         "outing": outing,
         "launch_sites": sites.list_sites(db, "launch"),
@@ -151,7 +154,22 @@ def _form_context(db: Session, outing) -> dict:
         "lookups": lookups.all_options(db),
         "all_buddies": buddies.list_all(db),
         "hikefly_category": flightlog.HIKEFLY_CATEGORY,
+        "igc_error": igc_error,
     }
+
+
+def _igc_dir() -> Path:
+    d = get_config().mount_roots()["igc"]
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _form_response(request: Request, db: Session, outing_id: int, igc_error: str | None = None) -> Response:
+    """Re-render the edit form for an outing (after an IGC upload/delete)."""
+    o = flightlog.get_outing(db, outing_id)
+    return templates.TemplateResponse(
+        request, "partials/outing_form.html", _form_context(db, serialize_outing(o), igc_error)
+    )
 
 
 @router.get("/api/flightlog/outings/new/form", include_in_schema=False)
@@ -203,6 +221,45 @@ def delete_outing(outing_id: int, db: Session = Depends(get_db)):
         db.delete(o)
         db.commit()
     return _redirect()
+
+
+# ---- IGC track upload / analysis -----------------------------------------
+
+@router.post("/api/flightlog/outings/{outing_id}/igc", include_in_schema=False)
+async def upload_igc(outing_id: int, request: Request, file: UploadFile, db: Session = Depends(get_db)):
+    o = db.get(Outing, outing_id)
+    if o is None:
+        return Response(status_code=404)
+    dest = _igc_dir() / f"{o.date.isoformat()}_{o.id}.igc"
+    dest.write_bytes(await file.read())
+    try:
+        stats = igc.analyze(str(dest))
+    except igc.IgcError as exc:
+        dest.unlink(missing_ok=True)
+        logger.warning("IGC analysis failed for outing %s: %s", outing_id, exc)
+        return _form_response(request, db, outing_id, igc_error=str(exc))
+
+    track = o.igc_track or IgcTrack(outing_id=o.id)
+    track.file = dest.name
+    track.analyzed_at = datetime.datetime.utcnow()
+    for key, value in stats.items():
+        setattr(track, key, value)
+    if o.igc_track is None:
+        db.add(track)
+    db.commit()
+    logger.info("IGC analyzed for outing %s: %s thermals, %sm climbed",
+                outing_id, stats["thermal_count"], stats["total_climb_m"])
+    return _form_response(request, db, outing_id)
+
+
+@router.post("/api/flightlog/outings/{outing_id}/igc/delete", include_in_schema=False)
+def delete_igc(outing_id: int, request: Request, db: Session = Depends(get_db)):
+    o = db.get(Outing, outing_id)
+    if o is not None and o.igc_track is not None:
+        (_igc_dir() / o.igc_track.file).unlink(missing_ok=True)
+        db.delete(o.igc_track)
+        db.commit()
+    return _form_response(request, db, outing_id)
 
 
 # ---- Manage dropdown data + buddies --------------------------------------
