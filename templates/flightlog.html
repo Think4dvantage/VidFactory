@@ -5,6 +5,8 @@
   <h1 class="text-xl font-semibold">Flight Log <span class="text-slate-400 text-sm">({{ stats.total_flights }} flights)</span></h1>
   <div class="flex items-center gap-2 text-xs">
     <a href="/flightlog/stats" class="rounded bg-sky-800 hover:bg-sky-700 px-2 py-1">📊 Statistics</a>
+    <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1"
+            hx-get="/api/flightlog/igc/scan" hx-target="#modal" hx-swap="innerHTML">📈 Import IGC</button>
     <a href="/api/flightlog/export.csv" class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1">⬇ Export CSV</a>
     <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1"
             hx-get="/api/flightlog/lookups" hx-target="#modal" hx-swap="innerHTML">⚙ Manage Dropdown Data</button>

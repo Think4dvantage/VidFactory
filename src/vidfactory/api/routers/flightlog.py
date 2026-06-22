@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
-from vidfactory.core import buddies, flightlog, igc, lookups, sites
+from vidfactory.core import buddies, flightlog, igc, igc_import, lookups, sites
 from vidfactory.database.db import get_db
 from vidfactory.database.models import IgcTrack, Outing
 from vidfactory.models.flightlog import SiteOut, serialize_outing
@@ -260,6 +260,22 @@ def delete_igc(outing_id: int, request: Request, db: Session = Depends(get_db)):
         db.delete(o.igc_track)
         db.commit()
     return _form_response(request, db, outing_id)
+
+
+@router.get("/api/flightlog/igc/scan", include_in_schema=False)
+def igc_scan(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(
+        request, "partials/igc_import.html", {"report": igc_import.plan(db), "applied": False}
+    )
+
+
+@router.post("/api/flightlog/igc/import", include_in_schema=False)
+def igc_run_import(request: Request, db: Session = Depends(get_db)):
+    resp = templates.TemplateResponse(
+        request, "partials/igc_import.html", {"report": igc_import.run_import(db), "applied": True}
+    )
+    resp.headers["HX-Trigger"] = "igc-imported"
+    return resp
 
 
 # ---- Manage dropdown data + buddies --------------------------------------

@@ -88,12 +88,17 @@ builds return `{job_id}` and stream progress over SSE. Routers under `api/router
 `GET /api/flightlog/outings/table` (HTMX table partial) · `GET/POST /api/flightlog/outings[/{id}[/delete]]` ·
 `GET /api/flightlog/outings/{new|id}/form` · lookups CRUD `GET/POST /api/flightlog/lookups[/{id}/delete]` ·
 buddies CRUD `POST /api/flightlog/buddies[/{id}/delete]` · IGC `POST /api/flightlog/outings/{id}/igc[/delete]`
-(multipart upload → `core/igc.py` analyze → `igc_tracks`) · `GET /api/flightlog/export.csv` ·
+(multipart upload → `core/igc.py` analyze → `igc_tracks`) · bulk IGC `GET /api/flightlog/igc/scan`
+(dry-run report) + `POST /api/flightlog/igc/import` (`core/igc_import.py`) · `GET /api/flightlog/export.csv` ·
 `GET /api/flightlog/{stats,sites,outings}` (JSON). (xlsx import is CLI-only: `python -m vidfactory.core.importer`.)
 
 > **IGC analysis** (`core/igc.py`) uses **libigc** (pip dep — adding it needs a Docker image **rebuild**,
-> not just a bind-mount sync). Per-outing upload only so far; bulk date/time matching of the `pg/igc`
-> library is a future phase. Tune `libigc.FlightParsingConfig` if paraglider thermals are mis-detected.
+> not just a bind-mount sync). A *thermal* = circling with **net altitude gain** (libigc otherwise flags
+> descending spirals/wingovers — see the paraglider-tuning fix). **Bulk import** (`core/igc_import.py`)
+> only auto-attaches *unambiguous* files: a date with exactly one untracked outing AND one unlinked IGC.
+> Multi-flight/multi-file days, no-outing, and already-tracked dates are reported for manual upload
+> (outings carry no clock time, so same-day multiples can't be auto-matched). Tune
+> `libigc.FlightParsingConfig` if paraglider thermals are still mis-detected.
 
 **projects** — `GET /projects/by-outing/{outing_id}` (create+redirect) · `GET /projects/{id}` page ·
 `GET /projects/{id}/editor` page · flight-type/parts(add,move,delete)/hike mutations ·
