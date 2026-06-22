@@ -19,6 +19,17 @@ class Site(Base):
     elevation_m: Mapped[int | None] = mapped_column(Integer)
 
 
+class Lookup(Base):
+    """Managed dropdown values for the outing form (category/glider/harness/launch_type)."""
+
+    __tablename__ = "lookups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # category|glider|harness|launch_type
+    value: Mapped[str] = mapped_column(String, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class Outing(Base):
     """One flight. Replaces the Flugbuch sheet. Optionally owns one Project."""
 

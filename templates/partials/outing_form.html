@@ -1,4 +1,17 @@
-{# Shared add/edit form. `outing` is an OutingOut or None. #}
+{# Shared add/edit form. `outing` is an OutingOut or None. `lookups` = {kind: [values]}. #}
+
+{%- macro lk_select(name, label, values, current) -%}
+<label class="flex flex-col">{{ label }}
+  <select name="{{ name }}" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
+    <option value="">—</option>
+    {% set found = namespace(v=false) %}
+    {% for v in values %}
+    <option value="{{ v }}" {% if current == v %}selected{% set found.v = true %}{% endif %}>{{ v }}</option>
+    {% endfor %}
+    {% if current and not found.v %}<option value="{{ current }}" selected>{{ current }}</option>{% endif %}
+  </select></label>
+{%- endmacro -%}
+
 <form
   hx-post="{{ ('/api/flightlog/outings/' ~ outing.id) if outing else '/api/flightlog/outings' }}"
   hx-swap="none"
@@ -24,9 +37,7 @@
       {% endfor %}
     </select></label>
 
-  <label class="flex flex-col">Category
-    <input name="category" value="{{ outing.category or '' if outing else '' }}"
-           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  {{ lk_select('category', 'Category', lookups.category, outing.category if outing else None) }}
   <label class="flex flex-col">Flight time (min)
     <input type="number" name="flight_time_min" value="{{ outing.flight_time_min if outing and outing.flight_time_min is not none else '' }}"
            class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
@@ -37,24 +48,20 @@
   <label class="flex flex-col">Max alt (m)
     <input type="number" name="max_alt_m" value="{{ outing.max_alt_m if outing and outing.max_alt_m is not none else '' }}"
            class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
-  <label class="flex flex-col">Glider
-    <input name="glider" value="{{ outing.glider or '' if outing else '' }}"
-           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
-  <label class="flex flex-col">Harness
-    <input name="harness" value="{{ outing.harness or '' if outing else '' }}"
-           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+  {{ lk_select('glider', 'Glider', lookups.glider, outing.glider if outing else None) }}
+  {{ lk_select('harness', 'Harness', lookups.harness, outing.harness if outing else None) }}
 
-  <label class="flex flex-col">Launch type
-    <input name="launch_type" value="{{ outing.launch_type or '' if outing else '' }}"
-           class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
-  <label class="flex flex-col sm:col-span-2 lg:col-span-3">Comment
+  {{ lk_select('launch_type', 'Launch type', lookups.launch_type, outing.launch_type if outing else None) }}
+  <label class="flex flex-col sm:col-span-2 lg:col-span-2">Comment
     <textarea name="comment" rows="2" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">{{ outing.comment or '' if outing else '' }}</textarea></label>
 
-  <div class="sm:col-span-2 lg:col-span-3 flex gap-2">
+  <div class="sm:col-span-2 lg:col-span-3 flex items-center gap-2">
     <button type="submit" class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1">{{ 'Save changes' if outing else 'Add outing' }}</button>
     {% if outing %}
     <button type="button" class="rounded bg-slate-700 hover:bg-slate-600 px-3 py-1"
             onclick="document.getElementById('outing-form-panel').innerHTML=''">Cancel</button>
     {% endif %}
+    <button type="button" class="rounded bg-slate-700 hover:bg-slate-600 px-3 py-1 ml-auto text-xs"
+            hx-get="/api/flightlog/lookups" hx-target="#modal" hx-swap="innerHTML">⚙ Manage Dropdown Data</button>
   </div>
 </form>

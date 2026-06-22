@@ -47,6 +47,14 @@ def _f(value) -> float | None:
         return None
 
 
+def _launch_type(value) -> str | None:
+    """Normalise the legacy f/r codes to the readable words used in the app."""
+    text = _s(value)
+    if text is None:
+        return None
+    return {"f": "forward", "r": "reverse"}.get(text.lower(), text)
+
+
 def _load_site_master(ws) -> list[tuple[str, str, int | None]]:
     """Launch in cols A/B, landing in cols D/E, from row 3 (headers in rows 1-2)."""
     out: list[tuple[str, str, int | None]] = []
@@ -107,13 +115,19 @@ def import_flugbuch(path: str | Path, db: Session, replace: bool = True) -> dict
                 max_alt_m=_i(row[9]),
                 glider=_s(row[11]),
                 harness=_s(row[12]),
-                launch_type=_s(row[13]),
+                launch_type=_launch_type(row[13]),
                 comment=_s(row[14]),
             )
         )
         outings += 1
 
     db.commit()
+
+    # Keep the form dropdowns in sync with whatever the import introduced.
+    from vidfactory.core import lookups
+
+    lookups.sync_from_outings(db)
+
     summary = {
         "sites_total": len(site_map),
         "sites_from_master": master_sites,

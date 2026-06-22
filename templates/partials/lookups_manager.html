@@ -1,0 +1,41 @@
+{# Modal overlay to manage form dropdown values. `groups` = [(kind, label, [(id, value)])].
+   Add/delete swap this whole partial back into #modal and trigger 'lookups-changed'. #}
+<div class="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-4 overflow-y-auto"
+     onclick="if(event.target===this)document.getElementById('modal').innerHTML=''">
+  <div class="mt-12 w-full max-w-3xl rounded-lg border border-slate-700 bg-slate-800 p-5 shadow-xl">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold">Manage Dropdown Data</h2>
+      <button class="text-slate-400 hover:text-white text-xl leading-none"
+              onclick="document.getElementById('modal').innerHTML=''">&times;</button>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      {% for kind, label, values in groups %}
+      <section class="rounded border border-slate-700 bg-slate-900/50 p-3">
+        <h3 class="text-xs uppercase tracking-wide text-slate-400 mb-2">{{ label }}</h3>
+        <ul class="space-y-1 mb-2 text-sm">
+          {% for vid, val in values %}
+          <li class="flex items-center justify-between gap-2 group">
+            <span>{{ val }}</span>
+            <button class="text-rose-400 hover:text-rose-300 text-xs opacity-70 hover:opacity-100"
+                    hx-post="/api/flightlog/lookups/{{ vid }}/delete"
+                    hx-target="#modal" hx-swap="innerHTML"
+                    hx-confirm="Remove “{{ val }}” from {{ label }}?">remove</button>
+          </li>
+          {% else %}
+          <li class="text-slate-500 text-xs">None yet.</li>
+          {% endfor %}
+        </ul>
+        <form class="flex gap-1" hx-post="/api/flightlog/lookups" hx-target="#modal" hx-swap="innerHTML">
+          <input type="hidden" name="kind" value="{{ kind }}">
+          <input name="value" required placeholder="Add {{ label|lower }}…"
+                 class="grow rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm">
+          <button class="rounded bg-sky-700 hover:bg-sky-600 px-2 py-1 text-sm">Add</button>
+        </form>
+      </section>
+      {% endfor %}
+    </div>
+
+    <p class="text-xs text-slate-500 mt-4">Existing flights keep their value even if you remove it here.</p>
+  </div>
+</div>

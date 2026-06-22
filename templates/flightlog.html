@@ -3,14 +3,14 @@
 {% block content %}
 <div class="flex items-center justify-between mb-4">
   <h1 class="text-xl font-semibold">Flight Log <span class="text-slate-400 text-sm">({{ stats.total_flights }} flights)</span></h1>
-  <form hx-post="/api/flightlog/import" hx-encoding="multipart/form-data" hx-swap="none"
-        class="flex items-center gap-2 text-xs">
-    <input type="file" name="file" accept=".xlsx" required
-           class="text-slate-300 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-slate-100">
+  <div class="flex items-center gap-2 text-xs">
+    <a href="/api/flightlog/export.csv" class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1">⬇ Export CSV</a>
     <button class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1"
-            onclick="return confirm('Import replaces all sites and outings. Continue?')">Import Flugbuch.xlsx</button>
-  </form>
+            hx-get="/api/flightlog/lookups" hx-target="#modal" hx-swap="innerHTML">⚙ Manage Dropdown Data</button>
+  </div>
 </div>
+
+<div id="modal"></div>
 
 <!-- Stats -->
 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
@@ -103,7 +103,8 @@
   <div class="flex items-center justify-between mb-2">
     <h2 class="text-sm uppercase tracking-wide text-slate-400">Add outing</h2>
   </div>
-  <div id="outing-form-panel">
+  <div id="outing-form-panel"
+       hx-get="/api/flightlog/outings/new/form" hx-trigger="lookups-changed from:body" hx-swap="innerHTML">
     {% set outing = None %}
     {% include "partials/outing_form.html" %}
   </div>

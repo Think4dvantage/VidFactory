@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import csv
 import datetime
+import io
 import logging
 import math
-import tempfile
 
-from fastapi import APIRouter, Depends, Request, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from vidfactory.api.templating import templates
-from vidfactory.core import flightlog, sites
-from vidfactory.core.importer import import_flugbuch
+from vidfactory.core import flightlog, lookups, sites
 from vidfactory.database.db import get_db
 from vidfactory.database.models import Outing
 from vidfactory.models.flightlog import SiteOut, serialize_outing
@@ -106,6 +106,7 @@ def flightlog_page(request: Request, db: Session = Depends(get_db)):
         "options": flightlog.filter_options(db),
         "launch_sites": sites.list_sites(db, "launch"),
         "landing_sites": sites.list_sites(db, "landing"),
+        "lookups": lookups.all_options(db),
     }
     ctx.update(_table_context(db, request))
     return templates.TemplateResponse(request, "flightlog.html", ctx)
@@ -118,19 +119,27 @@ def outings_table(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "partials/outings_table.html", ctx)
 
 
+def _form_context(db: Session, outing) -> dict:
+    return {
+        "outing": outing,
+        "launch_sites": sites.list_sites(db, "launch"),
+        "landing_sites": sites.list_sites(db, "landing"),
+        "lookups": lookups.all_options(db),
+    }
+
+
+@router.get("/api/flightlog/outings/new/form", include_in_schema=False)
+def outing_form_blank(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(request, "partials/outing_form.html", _form_context(db, None))
+
+
 @router.get("/api/flightlog/outings/{outing_id}/form", include_in_schema=False)
 def outing_form(outing_id: int, request: Request, db: Session = Depends(get_db)):
     o = flightlog.get_outing(db, outing_id)
     if o is None:
         return Response(status_code=404)
     return templates.TemplateResponse(
-        request,
-        "partials/outing_form.html",
-        {
-            "outing": serialize_outing(o),
-            "launch_sites": sites.list_sites(db, "launch"),
-            "landing_sites": sites.list_sites(db, "landing"),
-        },
+        request, "partials/outing_form.html", _form_context(db, serialize_outing(o))
     )
 
 
@@ -166,14 +175,67 @@ def delete_outing(outing_id: int, db: Session = Depends(get_db)):
     return _redirect()
 
 
-@router.post("/api/flightlog/import", include_in_schema=False)
-async def import_xlsx(file: UploadFile, db: Session = Depends(get_db)):
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-    summary = import_flugbuch(tmp_path, db, replace=True)
-    logger.info("Flugbuch upload import: %s", summary)
-    return _redirect()
+# ---- Manage dropdown data ------------------------------------------------
+
+def _manager_response(request: Request, db: Session) -> Response:
+    """Render the dropdown manager; signal the page to refresh the add form."""
+    resp = templates.TemplateResponse(
+        request, "partials/lookups_manager.html", {"groups": lookups.grouped(db)}
+    )
+    resp.headers["HX-Trigger"] = "lookups-changed"
+    return resp
+
+
+@router.get("/api/flightlog/lookups", include_in_schema=False)
+def lookups_manager(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(
+        request, "partials/lookups_manager.html", {"groups": lookups.grouped(db)}
+    )
+
+
+@router.post("/api/flightlog/lookups", include_in_schema=False)
+async def lookups_add(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    lookups.add(db, str(form.get("kind", "")), str(form.get("value", "")))
+    return _manager_response(request, db)
+
+
+@router.post("/api/flightlog/lookups/{lookup_id}/delete", include_in_schema=False)
+def lookups_delete(lookup_id: int, request: Request, db: Session = Depends(get_db)):
+    lookups.delete(db, lookup_id)
+    return _manager_response(request, db)
+
+
+# ---- CSV export ----------------------------------------------------------
+
+_CSV_COLUMNS = (
+    "date", "launch_site", "landing_site", "category", "flight_time_min",
+    "distance_km", "max_alt_m", "alt_gain_m", "glider", "harness", "launch_type", "comment",
+)
+
+
+@router.get("/api/flightlog/export.csv", include_in_schema=False)
+def export_csv(db: Session = Depends(get_db)):
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_CSV_COLUMNS)
+    for o in flightlog.list_outings(db, sort="date", direction="asc"):
+        row = serialize_outing(o)
+        writer.writerow([
+            row.date, row.launch_site_name or "", row.landing_site_name or "",
+            row.category or "", row.flight_time_min if row.flight_time_min is not None else "",
+            row.distance_km if row.distance_km is not None else "",
+            row.max_alt_m if row.max_alt_m is not None else "",
+            row.alt_gain_m if row.alt_gain_m is not None else "",
+            row.glider or "", row.harness or "", row.launch_type or "", row.comment or "",
+        ])
+    buf.seek(0)
+    today = datetime.date.today().isoformat()
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="flightlog_{today}.csv"'},
+    )
 
 
 # ---- JSON API ------------------------------------------------------------
