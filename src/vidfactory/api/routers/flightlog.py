@@ -61,8 +61,12 @@ def _table_context(db: Session, request: Request) -> dict:
         sort=f["sort"], direction=f["direction"], **filters,
     )
     f["page"] = page
+    igc_dates = igc_import.unlinked_igc_dates(db)
     return {
-        "outings": [serialize_outing(o) for o in rows],
+        "outings": [
+            serialize_outing(o, igc_available=(o.igc_track is None and o.date in igc_dates))
+            for o in rows
+        ],
         "total": total,
         "pages": pages,
         "page_size": PAGE_SIZE,
@@ -130,6 +134,7 @@ def flightlog_stats_page(request: Request, db: Session = Depends(get_db)):
         "flightlog_stats.html",
         {
             "stats": flightlog.stats(db),
+            "duration": flightlog.flight_duration_year(db),
             "category_matrix": flightlog.category_year_matrix(db),
             "launch_type": flightlog.launch_type_year(db),
             "buddy_matrix": flightlog.buddy_year_matrix(db),

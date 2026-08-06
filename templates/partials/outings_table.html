@@ -73,6 +73,7 @@
         <th class="text-right px-3 py-2 uppercase">Gain</th>
         <th class="text-left px-3 py-2 uppercase">Glider</th>
         <th class="text-left px-3 py-2 uppercase">Harness</th>
+        <th class="text-center px-2 py-2 uppercase" title="IGC track status">IGC</th>
         <th class="px-3 py-2"></th>
       </tr>
     </thead>
@@ -89,6 +90,18 @@
         <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right text-slate-400">{{ o.alt_gain_m if o.alt_gain_m is not none else '' }}</td>
         <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-slate-400">{{ o.glider or '' }}</td>
         <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-slate-400">{{ o.harness or '' }}</td>
+        <td class="px-2 pt-1 {% if not has_detail %}pb-1{% endif %} text-center">
+          {% if o.igc %}
+          <span class="text-emerald-400" title="IGC track linked — {{ o.igc.thermal_count }} thermals, ↑{{ o.igc.total_climb_m }} m">✅</span>
+          {% elif o.igc_available %}
+          <button class="text-amber-400 hover:scale-110 transition"
+                  title="IGC file available for this date — click to attach it (action needed)"
+                  hx-get="/api/flightlog/outings/{{ o.id }}/form" hx-target="#outing-form-panel" hx-swap="innerHTML"
+                  onclick="window.scrollTo({top:0,behavior:'smooth'})">⚠️</button>
+          {% else %}
+          <span class="text-slate-600" title="No IGC file found for this date">·</span>
+          {% endif %}
+        </td>
         <td class="px-3 pt-1 {% if not has_detail %}pb-1{% endif %} text-right whitespace-nowrap">
           <a class="text-emerald-300 hover:underline" href="/projects/by-outing/{{ o.id }}">{{ '🎬' if o.has_project else '+ video' }}</a>
           <button class="text-sky-300 hover:underline ml-2"
@@ -102,7 +115,7 @@
       {% if has_detail %}
       <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
         <td></td>
-        <td colspan="9" class="px-3 pb-2 pt-0 text-xs">
+        <td colspan="10" class="px-3 pb-2 pt-0 text-xs">
           {% if o.igc %}<span class="text-emerald-300" title="cumulative climb across {{ o.igc.thermal_count }} thermals">🌀 {{ o.igc.thermal_count }} thermals · ↑{{ o.igc.total_climb_m }} m</span>{% endif %}
           {% if o.buddy_names %}<span class="text-sky-300 {% if o.igc %}ml-3{% endif %}">👥 {{ o.buddy_names | join(', ') }}</span>{% endif %}
           {% if o.comment %}<span class="text-slate-400 italic {% if o.igc or o.buddy_names %}ml-3{% endif %}">💬 {{ o.comment }}</span>{% endif %}

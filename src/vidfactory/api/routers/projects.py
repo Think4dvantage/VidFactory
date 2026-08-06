@@ -14,7 +14,7 @@ import re
 
 from vidfactory.core import filebrowser, gpu_detector, highlights, music, projects, summary
 from vidfactory.core import shorts as shorts_engine
-from vidfactory.core.concat import build_preview, concatenate
+from vidfactory.core.concat import build_preview, concatenate, plan as concat_plan
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
@@ -234,6 +234,20 @@ def build_fullflight(project_id: int, db: Session = Depends(get_db)):
         return Response("No source parts added.", status_code=400)
     job = registry.run("concat", _build_target(project_id))
     return {"job_id": job.id}
+
+
+@router.get("/api/projects/{project_id}/concat-plan", include_in_schema=False)
+def concat_plan_partial(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = projects.get_project(db, project_id)
+    if project is None:
+        return Response(status_code=404)
+    parts = [p.file for p in projects.ordered_parts(project)]
+    hike = project.hike
+    use_hike = hike is not None and project.flight_type == "hike_and_fly"
+    hike_files = list(hike.sources) if use_hike else None
+    speed = hike.speed_factor if use_hike else 1.0
+    result = concat_plan(parts, get_runner(), hike_files=hike_files, speed_factor=speed)
+    return templates.TemplateResponse(request, "partials/concat_plan.html", {"plan": result})
 
 
 @router.get("/api/projects/{project_id}/status", include_in_schema=False)

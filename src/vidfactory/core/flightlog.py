@@ -318,6 +318,53 @@ def buddy_year_matrix(db: Session) -> dict:
     }
 
 
+def flight_duration_year(db: Session) -> dict:
+    """Average flight length per year — all flights, and excluding Hike&Fly (mostly sledders).
+
+    Returns per-year rows (avg with/without H&F + the counts each average is over) and overall
+    averages. Hike&Fly outings are filtered out of the "without" figures because they are usually
+    short top-to-bottom flights that drag the average down.
+    """
+    is_hf = Outing.category == HIKEFLY_CATEGORY
+    rows = db.execute(
+        select(
+            func.strftime("%Y", Outing.date),
+            func.count(Outing.flight_time_min),
+            func.avg(Outing.flight_time_min),
+            func.count(Outing.flight_time_min).filter(~is_hf),
+            func.avg(Outing.flight_time_min).filter(~is_hf),
+        )
+        .where(Outing.flight_time_min.is_not(None))
+        .group_by(func.strftime("%Y", Outing.date))
+    ).all()
+    per_year = []
+    for y, cnt, avg_all, cnt_nohf, avg_nohf in sorted(
+        (r for r in rows if r[0]), key=lambda r: r[0], reverse=True
+    ):
+        per_year.append({
+            "year": int(y),
+            "count": cnt or 0,
+            "avg_min": round(avg_all, 1) if avg_all else None,
+            "count_no_hf": cnt_nohf or 0,
+            "avg_min_no_hf": round(avg_nohf, 1) if avg_nohf else None,
+        })
+    tot = db.execute(
+        select(
+            func.count(Outing.flight_time_min),
+            func.avg(Outing.flight_time_min),
+            func.count(Outing.flight_time_min).filter(~is_hf),
+            func.avg(Outing.flight_time_min).filter(~is_hf),
+        ).where(Outing.flight_time_min.is_not(None))
+    ).first()
+    overall = {
+        "count": tot[0] or 0,
+        "avg_min": round(tot[1], 1) if tot[1] else None,
+        "count_no_hf": tot[2] or 0,
+        "avg_min_no_hf": round(tot[3], 1) if tot[3] else None,
+    }
+    return {"per_year": per_year, "overall": overall}
+
+
 def hikefly_stats(db: Session) -> dict:
     """Hike & Fly counts + climb/distance/duration totals & averages, overall and per year."""
     rows = db.execute(

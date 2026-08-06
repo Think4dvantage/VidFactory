@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import logging
 import re
+import time
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -42,6 +43,41 @@ def _igc_date(path) -> datetime.date | None:
     except OSError:
         return None
     return None
+
+
+# Cached set of dates that have an unlinked IGC file on the share. The flight-log table
+# re-renders on every filter/sort/page change, so we avoid re-reading ~600 IGC headers each
+# time. The cache key folds in the directory mtime + linked-track count, so it self-refreshes
+# whenever files are added/removed or a track is imported; the TTL is just a backstop.
+_DATES_CACHE: dict = {"key": None, "dates": frozenset(), "at": 0.0}
+
+
+def unlinked_igc_dates(db: Session, ttl: float = 60.0) -> frozenset[datetime.date]:
+    """Dates for which an IGC file exists in the igc root but is not yet linked to a track.
+
+    Used by the flight log to flag outings that still need an IGC attached (action needed).
+    """
+    igc_dir = get_config().mount_roots()["igc"]
+    linked = set(db.execute(select(IgcTrack.file)).scalars().all())
+    try:
+        dir_mtime = igc_dir.stat().st_mtime
+    except OSError:
+        dir_mtime = 0.0
+    key = (str(igc_dir), dir_mtime, len(linked))
+    now = time.time()
+    if _DATES_CACHE["key"] == key and now - _DATES_CACHE["at"] < ttl:
+        return _DATES_CACHE["dates"]
+
+    dates: set[datetime.date] = set()
+    for p in igc_dir.glob("*"):
+        if p.suffix.lower() != ".igc" or p.name in linked:
+            continue
+        d = _igc_date(p)
+        if d is not None:
+            dates.add(d)
+    result = frozenset(dates)
+    _DATES_CACHE.update(key=key, dates=result, at=now)
+    return result
 
 
 def _label(o: Outing) -> str:

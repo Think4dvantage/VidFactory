@@ -118,6 +118,61 @@
   </section>
 </div>
 
+<!-- Average flight length -->
+{%- macro hm(mins) -%}{% if mins is not none %}{{ (mins // 60) | int }}h{{ '%02d' | format((mins % 60) | round | int) }}{% else %}—{% endif %}{%- endmacro -%}
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mb-6">
+  <h2 class="text-sm uppercase tracking-wide text-slate-400 mb-1">Average flight length by year</h2>
+  <p class="text-xs text-slate-500 mb-3">Overall average
+    <span class="text-sky-300 font-medium">{{ duration.overall.avg_min or '—' }} min</span>
+    ({{ hm(duration.overall.avg_min) }}) over {{ duration.overall.count }} flights ·
+    excluding Hike&amp;Fly
+    <span class="text-emerald-300 font-medium">{{ duration.overall.avg_min_no_hf or '—' }} min</span>
+    ({{ hm(duration.overall.avg_min_no_hf) }}) over {{ duration.overall.count_no_hf }} flights</p>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-slate-400 text-xs uppercase">
+        <tr class="border-b border-slate-700">
+          <th class="text-left px-3 py-2">Year</th>
+          <th class="text-right px-3 py-2">Flights</th>
+          <th class="text-right px-3 py-2">Avg (min)</th>
+          <th class="text-right px-3 py-2">Avg (h:mm)</th>
+          <th class="text-right px-3 py-2">Flights (no H&amp;F)</th>
+          <th class="text-right px-3 py-2">Avg no H&amp;F (min)</th>
+          <th class="text-right px-3 py-2">Avg no H&amp;F (h:mm)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in duration.per_year %}
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+          <td class="px-3 py-1"><a href="/flightlog?year={{ r.year }}" class="hover:text-sky-300">{{ r.year }}</a></td>
+          <td class="px-3 py-1 text-right">{{ r.count }}</td>
+          <td class="px-3 py-1 text-right text-sky-300">{{ r.avg_min or '—' }}</td>
+          <td class="px-3 py-1 text-right text-slate-400">{{ hm(r.avg_min) }}</td>
+          <td class="px-3 py-1 text-right">{{ r.count_no_hf }}</td>
+          <td class="px-3 py-1 text-right text-emerald-300">{{ r.avg_min_no_hf or '—' }}</td>
+          <td class="px-3 py-1 text-right text-slate-400">{{ hm(r.avg_min_no_hf) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="px-3 py-2 text-slate-500">No flights with a logged duration yet.</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="border-t border-slate-600 text-slate-300">
+          <td class="px-3 py-2 font-medium">Overall</td>
+          <td class="px-3 py-2 text-right font-medium">{{ duration.overall.count }}</td>
+          <td class="px-3 py-2 text-right font-medium text-sky-300">{{ duration.overall.avg_min or '—' }}</td>
+          <td class="px-3 py-2 text-right font-medium text-slate-400">{{ hm(duration.overall.avg_min) }}</td>
+          <td class="px-3 py-2 text-right font-medium">{{ duration.overall.count_no_hf }}</td>
+          <td class="px-3 py-2 text-right font-medium text-emerald-300">{{ duration.overall.avg_min_no_hf or '—' }}</td>
+          <td class="px-3 py-2 text-right font-medium text-slate-400">{{ hm(duration.overall.avg_min_no_hf) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <p class="text-xs text-slate-500 mt-2">Hike&amp;Fly outings are excluded from the right-hand columns —
+    they're mostly short top-to-bottom sledders that pull the average down.</p>
+</section>
+
 <!-- Category by year -->
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mb-6">
   <h2 class="text-sm uppercase tracking-wide text-slate-400 mb-3">Category by year</h2>

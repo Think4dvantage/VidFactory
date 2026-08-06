@@ -166,6 +166,68 @@ def concatenate(
     return {"output": output, "duration": duration}
 
 
+def _safe_duration(runner: FFmpegRunner, file: str) -> tuple[float, str]:
+    """(seconds, note) for one file. note is '' when ok, else 'missing'/'unreadable'."""
+    if not Path(file).exists():
+        logger.warning("Concat plan: source missing — %s", file)
+        return 0.0, "missing"
+    try:
+        return runner.get_video_info(file)[2], ""
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully in the UI, never 500 the page
+        logger.warning("Concat plan: ffprobe failed for %s: %s", file, exc)
+        return 0.0, "unreadable"
+
+
+def plan(
+    parts: list[str],
+    runner: FFmpegRunner,
+    *,
+    hike_files: list[str] | None = None,
+    speed_factor: float = 1.0,
+) -> dict:
+    """Preview of what `concatenate` will produce: ordered items with durations + grand total.
+
+    Mirrors the real build order — for Hike & Fly the (optionally sped-up) hike is prepended.
+    Probes each source on demand; missing/unreadable files are flagged, not fatal.
+    """
+    rows: list[dict] = []
+    total = 0.0
+    has_issue = False
+
+    needs_speed = bool(hike_files) and abs(speed_factor - 1.0) > 1e-3
+    if hike_files:
+        raw = 0.0
+        for f in hike_files:
+            d, note = _safe_duration(runner, f)
+            raw += d
+            has_issue = has_issue or bool(note)
+        out_dur = (raw / speed_factor) if needs_speed else raw
+        note = (
+            f"{len(hike_files)} file(s), {_hms_label(raw)} raw → ×{speed_factor:g}"
+            if needs_speed else f"{len(hike_files)} file(s)"
+        )
+        rows.append({"label": "Hike (prepended)", "seconds": out_dur, "note": note, "kind": "hike"})
+        total += out_dur
+
+    for f in parts:
+        d, note = _safe_duration(runner, f)
+        has_issue = has_issue or bool(note)
+        rows.append({"label": Path(f).name, "seconds": d, "note": note, "kind": "part"})
+        total += d
+
+    logger.info("Concat plan: %d item(s), total %.1fs%s", len(rows), total,
+                " (has issues)" if has_issue else "")
+    return {"rows": rows, "total_seconds": total, "part_count": len(parts),
+            "has_hike": bool(hike_files), "has_issue": has_issue}
+
+
+def _hms_label(value: float) -> str:
+    total = int(round(value or 0))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
 def _probe_fps(runner: FFmpegRunner, file: str) -> str:
     data = runner.probe(file)
     streams = data.get("streams", [])

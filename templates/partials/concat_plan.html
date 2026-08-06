@@ -1,0 +1,29 @@
+{% if plan.rows %}
+<div class="rounded border border-slate-700 bg-slate-900/40 p-2 text-sm">
+  <div class="text-xs uppercase tracking-wide text-slate-400 mb-1">Build plan — concatenation order</div>
+  <ol class="divide-y divide-slate-700/60">
+    {% for it in plan.rows %}
+    <li class="flex items-center justify-between gap-3 py-1">
+      <span class="truncate">
+        {{ loop.index }}.
+        {% if it.kind == 'hike' %}⛰️{% endif %}
+        {{ it.label }}
+        {% if it.note %}<span class="text-slate-500 text-xs">({{ it.note }})</span>{% endif %}
+      </span>
+      <span class="shrink-0 tabular-nums {% if it.note in ('missing', 'unreadable') %}text-rose-400{% else %}text-slate-300{% endif %}">
+        {% if it.note in ('missing', 'unreadable') %}{{ it.note }}{% else %}{{ it.seconds | hms }}{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ol>
+  <div class="flex items-center justify-between border-t border-slate-600 mt-1 pt-1 font-medium">
+    <span>Full flight ≈ <span class="text-slate-400 text-xs font-normal">{{ plan.part_count }} part(s){% if plan.has_hike %} + hike{% endif %}</span></span>
+    <span class="tabular-nums">{{ plan.total_seconds | hms }}</span>
+  </div>
+  {% if plan.has_issue %}
+  <p class="text-rose-400 text-xs mt-1">⚠ Some sources are missing or unreadable — check the NAS mount before building.</p>
+  {% endif %}
+</div>
+{% else %}
+<p class="text-slate-400 text-sm">No source parts yet — add some below to see the build plan.</p>
+{% endif %}

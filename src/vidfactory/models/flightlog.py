@@ -75,9 +75,11 @@ class OutingOut(OutingBase):
     buddy_ids: list[int] = []
     buddy_names: list[str] = []
     igc: IgcOut | None = None
+    # True when no track is linked but an IGC file for this date sits unlinked on the share.
+    igc_available: bool = False
 
 
-def serialize_outing(o: Outing) -> OutingOut:
+def serialize_outing(o: Outing, igc_available: bool = False) -> OutingOut:
     metrics = derived_metrics(o)
     return OutingOut(
         id=o.id,
@@ -103,4 +105,5 @@ def serialize_outing(o: Outing) -> OutingOut:
         buddy_ids=[b.id for b in o.buddies],
         buddy_names=[b.name for b in o.buddies],
         igc=IgcOut.model_validate(o.igc_track) if o.igc_track else None,
+        igc_available=igc_available,
     )

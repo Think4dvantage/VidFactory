@@ -23,6 +23,10 @@
   <!-- Build -->
   <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Full flight</h2>
+    <div class="mb-3" hx-get="/api/projects/{{ project.id }}/concat-plan" hx-trigger="load"
+         hx-swap="innerHTML">
+      <p class="text-slate-500 text-sm">Loading build plan…</p>
+    </div>
     <button id="build-btn" class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1 text-sm">▶ Build Full Flight</button>
     <div id="build-progress" class="mt-2 text-sm" hidden>
       <div class="text-slate-300"><span id="b-stage"></span> — <span id="b-pct">0</span>% <span id="b-speed" class="text-slate-500"></span></div>
