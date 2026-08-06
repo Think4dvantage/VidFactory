@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date as Date_, datetime
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Table, Text,
+    Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -12,112 +12,16 @@ class Base(DeclarativeBase):
     pass
 
 
-# Many-to-many: which buddies were on a given outing.
-outing_buddies = Table(
-    "outing_buddies",
-    Base.metadata,
-    Column("outing_id", ForeignKey("outings.id", ondelete="CASCADE"), primary_key=True),
-    Column("buddy_id", ForeignKey("buddies.id", ondelete="CASCADE"), primary_key=True),
-)
-
-
-class Site(Base):
-    __tablename__ = "sites"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    kind: Mapped[str] = mapped_column(String, nullable=False)  # 'launch' | 'landing'
-    elevation_m: Mapped[int | None] = mapped_column(Integer)
-
-
-class Lookup(Base):
-    """Managed dropdown values for the outing form (category/glider/harness/launch_type)."""
-
-    __tablename__ = "lookups"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kind: Mapped[str] = mapped_column(String, nullable=False)  # category|glider|harness|launch_type
-    value: Mapped[str] = mapped_column(String, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-
-class Buddy(Base):
-    """A person the user flies with (multiselect on each outing)."""
-
-    __tablename__ = "buddies"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-
-class Outing(Base):
-    """One flight. Replaces the Flugbuch sheet. Optionally owns one Project."""
-
-    __tablename__ = "outings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    date: Mapped[Date] = mapped_column(Date, nullable=False)
-    launch_site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"))
-    landing_site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"))
-    glider: Mapped[str | None] = mapped_column(String)
-    harness: Mapped[str | None] = mapped_column(String)
-    flight_time_min: Mapped[int | None] = mapped_column(Integer)
-    distance_km: Mapped[float | None] = mapped_column(Float)
-    max_alt_m: Mapped[int | None] = mapped_column(Integer)
-    category: Mapped[str | None] = mapped_column(String)
-    launch_type: Mapped[str | None] = mapped_column(String)
-    comment: Mapped[str | None] = mapped_column(Text)
-    # Hike & Fly metrics (only filled when category is Hike&Fly).
-    climb_m: Mapped[int | None] = mapped_column(Integer)
-    hike_distance_km: Mapped[float | None] = mapped_column(Float)
-    hike_duration_min: Mapped[int | None] = mapped_column(Integer)
-
-    launch_site: Mapped[Site | None] = relationship(foreign_keys=[launch_site_id])
-    landing_site: Mapped[Site | None] = relationship(foreign_keys=[landing_site_id])
-    project: Mapped["Project | None"] = relationship(back_populates="outing", uselist=False)
-    buddies: Mapped[list[Buddy]] = relationship(secondary=outing_buddies, order_by="Buddy.name")
-    igc_track: Mapped["IgcTrack | None"] = relationship(
-        back_populates="outing", uselist=False, cascade="all, delete-orphan"
-    )
-
-
-class IgcTrack(Base):
-    """Aggregate stats derived from an outing's IGC track (one per outing)."""
-
-    __tablename__ = "igc_tracks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    outing_id: Mapped[int] = mapped_column(
-        ForeignKey("outings.id", ondelete="CASCADE"), unique=True, nullable=False
-    )
-    file: Mapped[str] = mapped_column(String, nullable=False)  # path under the igc root
-    analyzed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    # Flight extent
-    takeoff_at: Mapped[datetime | None] = mapped_column(DateTime)
-    landing_at: Mapped[datetime | None] = mapped_column(DateTime)
-    duration_s: Mapped[int | None] = mapped_column(Integer)
-    max_alt_m: Mapped[int | None] = mapped_column(Integer)
-    # Climbs / thermals
-    thermal_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_climb_m: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    best_climb_ms: Mapped[float | None] = mapped_column(Float)
-    avg_climb_ms: Mapped[float | None] = mapped_column(Float)
-    # Glides
-    glide_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_glide_km: Mapped[float | None] = mapped_column(Float)
-    glide_ratio: Mapped[float | None] = mapped_column(Float)
-
-    outing: Mapped[Outing] = relationship(back_populates="igc_track")
-
-
 class Project(Base):
-    """The video work for an outing."""
+    """The video work for a flight. Standalone — flight-log metadata (site/glider/date) lives in a
+    separate Flightlog service; `external_flight_id` is an opaque, unenforced future reference to
+    it (see `core/flightlog_client.py`)."""
 
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    outing_id: Mapped[int | None] = mapped_column(ForeignKey("outings.id"), unique=True)
+    date: Mapped[Date_ | None] = mapped_column(Date)
+    external_flight_id: Mapped[int | None] = mapped_column(Integer)
     flight_type: Mapped[str] = mapped_column(String, default="normal_flight")  # | 'hike_and_fly'
     full_flight_file: Mapped[str | None] = mapped_column(String)
     preview_file: Mapped[str | None] = mapped_column(String)  # 720p editor proxy
@@ -126,7 +30,6 @@ class Project(Base):
     youtube_metadata_file: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    outing: Mapped[Outing | None] = relationship(back_populates="project")
     source_parts: Mapped[list["SourcePart"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )

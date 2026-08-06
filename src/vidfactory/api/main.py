@@ -4,18 +4,20 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from vidfactory import __version__
-from vidfactory.api.routers import browser, flightlog, projects, sse
+from vidfactory.api.routers import browser, projects, sse
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 from vidfactory.core import filebrowser, gpu_detector
+from vidfactory.core import projects as projects_core
 from vidfactory.core.jobs import registry
-from vidfactory.database.db import get_engine, init_db
+from vidfactory.database.db import get_db, get_engine, init_db
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +53,12 @@ app = FastAPI(title="VidFactory", version=__version__, lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(browser.router)
-app.include_router(flightlog.router)
 app.include_router(projects.router)
 app.include_router(sse.router)
 
 
 @app.get("/", include_in_schema=False)
-def index(request: Request):
+def index(request: Request, db: Session = Depends(get_db)):
     cfg = get_config()
     return templates.TemplateResponse(
         request,
@@ -68,6 +69,7 @@ def index(request: Request):
             "mounts": filebrowser.check_mounts(),
             "roots": cfg.mount_roots(),
             "jobs": [j.public() for j in registry.list()],
+            "projects": projects_core.list_projects(db),
         },
     )
 

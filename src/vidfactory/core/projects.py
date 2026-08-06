@@ -1,6 +1,8 @@
-"""Project helpers: create from an outing, manage source parts and the hike, build paths."""
+"""Project helpers: create standalone, manage source parts and the hike, build paths."""
 
 from __future__ import annotations
+
+import datetime
 
 from pathlib import Path
 
@@ -8,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from vidfactory.config import get_config
-from vidfactory.database.models import Hike, Outing, Project, SourcePart
+from vidfactory.database.models import Hike, Project, SourcePart
 
 
 def get_project(db: Session, project_id: int) -> Project | None:
@@ -20,20 +22,21 @@ def get_project(db: Session, project_id: int) -> Project | None:
             selectinload(Project.highlights),
             selectinload(Project.pools),
             selectinload(Project.shorts),
-            selectinload(Project.outing).selectinload(Outing.launch_site),
-            selectinload(Project.outing).selectinload(Outing.landing_site),
         )
         .where(Project.id == project_id)
     ).scalar_one_or_none()
 
 
-def get_or_create_for_outing(db: Session, outing_id: int) -> Project:
-    existing = db.execute(
-        select(Project).where(Project.outing_id == outing_id)
-    ).scalar_one_or_none()
-    if existing:
-        return existing
-    project = Project(outing_id=outing_id, flight_type="normal_flight")
+def list_projects(db: Session) -> list[Project]:
+    return list(
+        db.execute(
+            select(Project).order_by(Project.date.desc().nullslast(), Project.created_at.desc())
+        ).scalars()
+    )
+
+
+def create_project(db: Session, date: datetime.date | None = None) -> Project:
+    project = Project(date=date or datetime.date.today(), flight_type="normal_flight")
     db.add(project)
     db.commit()
     return get_project(db, project.id)
@@ -89,8 +92,8 @@ def set_hike(db: Session, project: Project, sources: list[str], speed_factor: fl
 
 
 def _stem(project: Project) -> str:
-    date = project.outing.date if project.outing and project.outing.date else None
-    return date.strftime("%Y%m%d") if date else f"project{project.id}"
+    date = project.date or project.created_at.date()
+    return date.strftime("%Y%m%d")
 
 
 def fullflight_output_path(project: Project) -> str:

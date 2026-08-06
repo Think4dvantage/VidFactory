@@ -2,11 +2,10 @@
 {% block title %}VidFactory — Project{% endblock %}
 {% block content %}
 <div class="mb-4">
-  <a href="/flightlog" class="text-sm text-sky-300 hover:underline">← Flight Log</a>
+  <a href="/" class="text-sm text-sky-300 hover:underline">← Dashboard</a>
   <h1 class="text-xl font-semibold mt-1">
     Video Project
-    {% if outing %}<span class="text-slate-400 text-sm">— {{ outing.date }}
-      {{ outing.launch_site.name if outing.launch_site else '?' }} → {{ outing.landing_site.name if outing.landing_site else '?' }}</span>{% endif %}
+    {% if project.date %}<span class="text-slate-400 text-sm">— {{ project.date }}</span>{% endif %}
   </h1>
 </div>
 
@@ -69,6 +68,13 @@
       {% if not instaout_files %}<span class="text-slate-400">No videos found in {{ videos_root }}</span>{% endif %}
     </div>
     <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Add selected parts</button>
+  </form>
+
+  <p class="text-xs uppercase tracking-wide text-slate-400 mt-4 mb-2">Or upload raw video (when the NAS isn't reachable)</p>
+  <form hx-post="/api/projects/{{ project.id }}/parts/upload" hx-encoding="multipart/form-data" hx-swap="none">
+    <input type="file" name="files" multiple accept="video/*"
+           class="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-slate-200 hover:file:bg-slate-600">
+    <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Upload</button>
   </form>
 </section>
 

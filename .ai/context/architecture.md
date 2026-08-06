@@ -1,15 +1,24 @@
 # Architecture Reference
 
 This is the source-of-truth data model and contract for VidFactory. Update it whenever the schema,
-pipeline, or deployment changes. (No InfluxDB and no in-app auth — see `01-project-overview.md`.)
+pipeline, or deployment changes. (No InfluxDB and no in-app auth — see `01-project-overview.md`;
+note in-app auth is now on the roadmap, see `features.md` "Multi-user".)
 
 ## Core concept
 
-The **Outing** (one flight) is the top-level record and replaces the `Flugbuch.xlsx` logbook. An
-Outing optionally owns one **Project** (the video work). A **Highlight** is marked once on the
-assembled full-flight timeline and is the shared spine: it produces summary segments, YouTube
-chapters, and named-short sources. `launch` and `landing` are just Highlights with a `role` and are
-**optional** (the camera isn't always rolling at launch / battery may die before landing).
+**Project is the top-level record.** Flight-log/logbook data (site, glider, date, IGC analytics)
+used to live in this app as the **Outing** table but has moved to a separate **Flightlog**
+project/service; `Project.external_flight_id` is an opaque, unenforced, currently-unused reference
+to that service's future API (`core/flightlog_client.py`), and `Project.date` is the app's own
+minimal flight date (set at creation, editable). A **Highlight** is marked once on the assembled
+full-flight timeline and is the shared spine: it produces summary segments, YouTube chapters, and
+named-short sources. `launch` and `landing` are just Highlights with a `role` and are **optional**
+(the camera isn't always rolling at launch / battery may die before landing).
+
+> The live SQLite DB still physically contains the old `outings`, `sites`, `lookups`, `buddies`,
+> `outing_buddies`, and `igc_tracks` tables (598 outings, 281 igc_tracks rows) — they are **not
+> dropped**, since that data seeds the separate Flightlog project. This app's code no longer maps
+> or queries them at all; treat them as foreign/legacy on this DB file.
 
 ---
 
@@ -17,13 +26,8 @@ chapters, and named-short sources. `launch` and `landing` are just Highlights wi
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `sites` | `id`, `name`, `kind`('launch'\|'landing'), `elevation_m` | 27 launch + 27 landing master; dropdown source + VLOOKUP replacement |
-| `outings` | `id`, `date`, `launch_site_id→sites`, `landing_site_id→sites`, `glider`, `harness`, `flight_time_min`, `distance_km`, `max_alt_m`, `category`, `launch_type`, `comment`, `climb_m`, `hike_distance_km`, `hike_duration_min` | replaces the Flugbuch sheet; **598 rows imported**. `height_diff` & `alt_gain` are **derived** (max_alt − landing_elev / max_alt − launch_elev), not stored. `launch_type` is `forward`/`reverse` (normalised from legacy `f`/`r`). The three `*hike*`/`climb_m` columns are Hike&Fly-only metrics. |
-| `lookups` | `id`, `kind`('category'\|'glider'\|'harness'\|'launch_type'), `value`, `sort_order` | managed dropdown values for the outing form (migration 0003, seeded from existing data) |
-| `buddies` + `outing_buddies` | `buddies(id,name,sort_order)`; join `outing_buddies(outing_id,buddy_id)` | people the user flies with; multiselect per outing (migration 0004). ORM `secondary` relationship handles cleanup on single deletes; importer clears the join on `replace` |
-| `igc_tracks` | `id`, `outing_id→outings`(unique), `file`, `analyzed_at`, `takeoff_at`, `landing_at`, `duration_s`, `max_alt_m`, `thermal_count`, `total_climb_m`, `best_climb_ms`, `avg_climb_ms`, `glide_count`, `total_glide_km`, `glide_ratio` | 0..1 per outing (migration 0005). Aggregates derived from the uploaded IGC by `core/igc.py` (libigc). `total_climb_m` = **cumulative** climb across all thermals (≠ max−launch). `glide_ratio` = achieved over-ground glide. `cascade=delete-orphan` |
-| `projects` | `id`, `outing_id→outings` (unique, nullable), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | 0..1 per outing |
-| `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw Insta360 ~30-min parts, user-orderable |
+| `projects` | `id`, `date` (nullable), `external_flight_id` (nullable, opaque — no FK), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | **top-level**; standalone (migration 0006 added `date`/`external_flight_id`, replacing the old `outing_id` FK — see Core concept above). Created via `POST /projects/new` |
+| `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw source video parts (NAS-browsed **or uploaded**, see Storage & mounts), user-orderable |
 | `hikes` | `id`, `project_id→projects`, `sources`(json list), `speed_factor`(default 32.0) | H&F only; sped up and prepended to the full flight |
 | `highlights` | `id`, `project_id→projects`, `name`, `start`, `end`, `comment`, `type`('video'\|'picture'), `role`('normal'\|'launch'\|'landing'), `image_path`(nullable), `duration`(nullable, picture), `use_in_summary`(bool), `make_short`(bool) | **the spine**; times on the full-flight timeline. At most one `launch` and one `landing`, both optional |
 | `pools` | `id`, `project_id→projects`, `kind`('flying'\|'hiking'), `start`, `end` | ranges **on the full flight** for random short sampling (legacy mode) |
@@ -62,10 +66,12 @@ automatically after the full flight, or on demand. IN/OUT marks map 1:1 to the 4
      **under 30 s**; short title = highlight name. (`launch`/`landing` skipped if not marked.)
    - **Random-pool (legacy):** `launch? → flying → landing? → CTA`; random sampling with chronological
      re-sort and a `UsedMap` (per-file consumed ranges) so a batch never reuses footage.
-4. **YouTube artifacts** (`youtube_meta.py`) — `metadata.json` (+ readable `.txt`): chapters from
-   highlights (`MM:SS Name`, first `00:00`, enforce YouTube ≥3 chapters / ≥10 s); summary + per-short
-   titles/descriptions (site/glider pulled from the Outing); suggested release dates (2–3 Shorts/wk);
-   aggregated music credits. Consumed downstream by the YTChannelMgmt MCP.
+4. **YouTube artifacts** (`youtube_meta.py`, not yet built) — `metadata.json` (+ readable `.txt`):
+   chapters from highlights (`MM:SS Name`, first `00:00`, enforce YouTube ≥3 chapters / ≥10 s);
+   summary + per-short titles/descriptions (site/glider, once available via
+   `core/flightlog_client.py` — the Flightlog API doesn't exist yet, so this may ship without it
+   and backfill later); suggested release dates (2–3 Shorts/wk); aggregated music credits. Consumed
+   downstream by the YTChannelMgmt MCP.
 
 **Music** (`music.py`) — folder mode (shuffle to cover duration; durations cached by folder-path hash)
 or single-file mode (loop). `loudnorm` (EBU R128) then `amix` (`duration=first`, `normalize=0`) at a
@@ -83,33 +89,16 @@ builds return `{job_id}` and stream progress over SSE. Routers under `api/router
 **browser** — `GET /browse/{root}` page · `GET /api/browse/{root}?path=` (HTMX listing) ·
 `GET /api/thumb/{root}?path=` (jpeg).
 
-**flightlog** — `GET /flightlog` page (filter/sort/paginate via `?search/year/category/glider/sort/direction/page`) ·
-`GET /flightlog/stats` page (year-comparison matrices: category×year, launch-type+reverse-%, buddy×year, Hike&Fly) ·
-`GET /api/flightlog/outings/table` (HTMX table partial) · `GET/POST /api/flightlog/outings[/{id}[/delete]]` ·
-`GET /api/flightlog/outings/{new|id}/form` · lookups CRUD `GET/POST /api/flightlog/lookups[/{id}/delete]` ·
-buddies CRUD `POST /api/flightlog/buddies[/{id}/delete]` · IGC `POST /api/flightlog/outings/{id}/igc[/delete]`
-(multipart upload → `core/igc.py` analyze → `igc_tracks`) · bulk IGC `GET /api/flightlog/igc/scan`
-(dry-run report) + `POST /api/flightlog/igc/import` (`core/igc_import.py`) · `GET /api/flightlog/export.csv` ·
-`GET /api/flightlog/{stats,sites,outings}` (JSON). (xlsx import is CLI-only: `python -m vidfactory.core.importer`.)
+> Flight-log (`/flightlog*`) has been removed — see Core concept above and `features.md` M1a. There
+> is no `flightlog` router anymore; those routes 404.
 
-> **IGC analysis** (`core/igc.py`) uses **libigc** (pip dep — adding it needs a Docker image **rebuild**,
-> not just a bind-mount sync). A *thermal* = circling with **net altitude gain** (libigc otherwise flags
-> descending spirals/wingovers — see the paraglider-tuning fix). **Bulk import** (`core/igc_import.py`)
-> only auto-attaches *unambiguous* files: a date with exactly one untracked outing AND one unlinked IGC.
-> Multi-flight/multi-file days, no-outing, and already-tracked dates are reported for manual upload
-> (outings carry no clock time, so same-day multiples can't be auto-matched). Tune
-> `libigc.FlightParsingConfig` if paraglider thermals are still mis-detected.
->
-> **Duplicates:** the `pg/igc` library mixes device files (`*-XTR-*.IGC`) and XContest downloads; the
-> same flight can appear twice. Files are matched as the same flight by date + >50% B-record time-window
-> overlap. Redundant device dupes are staged in `pg/igc/.device_dupes/` (hidden from the non-recursive
-> `*.igc` glob, reversible); device-only flights with no XContest twin are kept. `igc_tracks.file` is the
-> single linked source per outing; deleting a track unlinks + removes that file (`missing_ok`).
-
-**projects** — `GET /projects/by-outing/{outing_id}` (create+redirect) · `GET /projects/{id}` page ·
-`GET /projects/{id}/editor` page · flight-type/parts(add,move,delete)/hike mutations ·
-`GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if present) ·
-highlight CRUD `GET/POST /api/projects/{id}/highlights[/{hid}[/delete]]` (JSON) ·
+**projects** — `POST /projects/new` (create+redirect; optional `date` form field, defaults to today) ·
+`GET /projects/{id}` page · `GET /projects/{id}/editor` page ·
+flight-type/parts(add,upload,move,delete)/hike mutations ·
+`POST /api/projects/{id}/parts/upload` (multipart, one or more files; streamed in 8 MB chunks to
+`VF_UPLOADS_DIR/{project_id}/`, then added as `SourcePart`s — the local-disk alternative to browsing
+the NAS) · `GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if
+present) · highlight CRUD `GET/POST /api/projects/{id}/highlights[/{hid}[/delete]]` (JSON) ·
 builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/build,shorts/build}` ·
 `GET /api/projects/{id}/status`.
 
@@ -122,17 +111,18 @@ builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summar
 
 ## Storage & mounts
 
-The share `//172.18.10.10/pg` is **NFS-mounted** on the Fedora host at `/mnt/pg` and bound into the
-container at `/data`. Roots are env-configurable; actual folder names on the share:
+The share `//172.18.10.10/pg` is **NFS-mounted** on the (now-retired) Fedora host at `/mnt/pg` and
+bound into the container at `/data`. **This NAS is currently unreachable** (home network/host
+changed after a move) — the app degrades gracefully (see health check below), but `VF_VIDEOS` browse
+is effectively unusable until it's back. Roots are env-configurable; actual folder names on the share:
 
 | Env | Value | Use |
 |---|---|---|
-| `VF_VIDEOS` | `/data/InstaOut` | source video parts (read) |
+| `VF_VIDEOS` | `/data/InstaOut` | source video parts (read) — **NAS-dependent, currently down** |
 | `VF_MUSIC` | `/data/Music` | music library (read) — **not on the share yet** |
 | `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + full-flight-with-music + credits (write) |
 | `VF_OUTPUT_SHORTS` | `/data/shorts` | shorts (write) |
 | `VF_ARCHIVE` | `/data/Archive` | metadata.json + credits (write) |
-| `VF_IGC` | `/data/igc` | uploaded IGC tracks (write); on the `pg` share at `\\…\pg\igc` |
 | (full flights) | `/data/fullflights` | concat output (wired in M2) |
 
 **The SQLite DB lives on a LOCAL docker volume** (`VF_DATA_DIR=/app/data`, volume `vf_data`), **not on
@@ -140,9 +130,19 @@ the NAS** — SQLite WAL mode does not work over NFS/SMB. The NAS `archive` root
 artifacts (metadata.json, credits). Startup health check verifies each root; a missing mount is
 reported as `degraded` (HTTP 200, app stays reachable) — see `08-operability.md`.
 
+**Uploaded raw video** lives on its own LOCAL docker volume, `vf_uploads` (`VF_UPLOADS_DIR=/app/uploads`,
+config `uploads_dir`) — deliberately **not** the NAS mount, since the whole point is to work while
+the NAS is unreachable. Layout: `{uploads_dir}/{project_id}/{filename}`. Uploaded parts are kept
+indefinitely (no cleanup-after-build); the new host has 55 TB, so this isn't a near-term concern.
+
 ---
 
 ## Deployment
+
+> **Stale — host retired.** Everything below (GPU/CDI specifics, Traefik labels, `xpsex` SSH deploy)
+> described the old Fedora XPS host, which is no longer reachable after a move. Deploy target is a
+> new host (55 TB storage) not yet detailed here; see `features.md` "Host migration" roadmap item.
+> Kept as reference until that migration happens and this section gets rewritten for the new host.
 
 Mirrors `C:\git\LSMFAPI`; registered in the `C:\git\lg4.ch` management repo. Domains: **`vf-dev.lg4.ch`**
 (dev) and **`vf.lg4.ch`** (prod). Image: `ghcr.io/think4dvantage/vidfactory:vX`.

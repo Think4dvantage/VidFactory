@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import datetime
 import logging
+import uuid
 
 from pathlib import Path
 
@@ -55,9 +57,12 @@ def _redirect(project_id: int) -> Response:
     return Response(status_code=204, headers={"HX-Redirect": f"/projects/{project_id}"})
 
 
-@router.get("/projects/by-outing/{outing_id}", include_in_schema=False)
-def project_for_outing(outing_id: int, db: Session = Depends(get_db)):
-    project = projects.get_or_create_for_outing(db, outing_id)
+@router.post("/projects/new", include_in_schema=False)
+async def create_project(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    date_str = str(form.get("date") or "")
+    project_date = datetime.date.fromisoformat(date_str) if date_str else None
+    project = projects.create_project(db, date=project_date)
     return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
 
@@ -72,7 +77,6 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
         "project.html",
         {
             "project": project,
-            "outing": project.outing,
             "parts": projects.ordered_parts(project),
             "hike": project.hike,
             "instaout_files": _video_files(),
@@ -97,7 +101,7 @@ def editor_page(project_id: int, request: Request, db: Session = Depends(get_db)
     return templates.TemplateResponse(
         request,
         "editor.html",
-        {"project": project, "outing": project.outing, "has_preview": has_preview},
+        {"project": project, "has_preview": has_preview},
     )
 
 
@@ -190,6 +194,34 @@ async def add_parts(project_id: int, request: Request, db: Session = Depends(get
     files = [str(root / rel) for rel in rels if rel]
     if files:
         projects.add_parts(db, project, files)
+    return _redirect(project_id)
+
+
+_UPLOAD_CHUNK = 8 * 1024 * 1024
+
+
+@router.post("/api/projects/{project_id}/parts/upload", include_in_schema=False)
+async def upload_parts(project_id: int, request: Request, db: Session = Depends(get_db)):
+    project = projects.get_project(db, project_id)
+    if project is None:
+        return Response(status_code=404)
+    form = await request.form()
+    files = [f for f in form.getlist("files") if hasattr(f, "filename") and f.filename]
+    if not files:
+        return Response("No files selected.", status_code=400)
+    dest_dir = get_config().uploads_dir_path / str(project_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[str] = []
+    for f in files:
+        name = Path(f.filename).name  # strip any directory components from the client
+        dest = dest_dir / name
+        if dest.exists():
+            dest = dest_dir / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+        with dest.open("wb") as out:
+            while chunk := await f.read(_UPLOAD_CHUNK):
+                out.write(chunk)
+        saved.append(str(dest))
+    projects.add_parts(db, project, saved)
     return _redirect(project_id)
 
 

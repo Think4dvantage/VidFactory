@@ -5,7 +5,7 @@
   <div>
     <a href="/projects/{{ project.id }}" class="text-sm text-sky-300 hover:underline">← Project</a>
     <h1 class="text-xl font-semibold mt-1">Highlight Editor
-      {% if outing %}<span class="text-slate-400 text-sm">— {{ outing.date }}</span>{% endif %}
+      {% if project.date %}<span class="text-slate-400 text-sm">— {{ project.date }}</span>{% endif %}
     </h1>
   </div>
   <div class="text-xs text-slate-400">Space = play/pause · I = set IN · O = set OUT</div>

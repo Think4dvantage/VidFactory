@@ -25,7 +25,6 @@ class MountsSection(BaseModel):
     output_summaries: str = "/data/summaries"
     output_shorts: str = "/data/shorts"
     archive: str = "/data/Archive"
-    igc: str = "/data/igc"
 
 
 class EncodeSection(BaseModel):
@@ -57,6 +56,9 @@ class Config(BaseModel):
     # Local data dir for the SQLite DB + caches. MUST be a local filesystem — SQLite WAL mode
     # does not work over NFS/SMB, so this is deliberately separate from the NAS `archive` mount.
     data_dir: str = "/app/data"
+    # Local disk for uploaded raw source video (NAS is not always reachable). Separate from
+    # data_dir only so it can be sized/backed up independently on the host.
+    uploads_dir: str = "/app/uploads"
     app: AppSection = Field(default_factory=AppSection)
     ffmpeg: FFmpegSection = Field(default_factory=FFmpegSection)
     mounts: MountsSection = Field(default_factory=MountsSection)
@@ -67,6 +69,10 @@ class Config(BaseModel):
     @property
     def db_path(self) -> Path:
         return Path(self.data_dir) / "vidfactory.db"
+
+    @property
+    def uploads_dir_path(self) -> Path:
+        return Path(self.uploads_dir)
 
     @property
     def fonts_conf(self) -> Path:
@@ -85,11 +91,10 @@ class Config(BaseModel):
             "output_summaries": Path(self.mounts.output_summaries),
             "output_shorts": Path(self.mounts.output_shorts),
             "archive": Path(self.mounts.archive),
-            "igc": Path(self.mounts.igc),
         }
 
     def writable_roots(self) -> set[str]:
-        return {"output_fullflights", "output_summaries", "output_shorts", "archive", "igc"}
+        return {"output_fullflights", "output_summaries", "output_shorts", "archive"}
 
 
 # Environment overrides for the storage roots (handy in docker-compose / .env).
@@ -100,7 +105,6 @@ _ENV_MOUNT_KEYS = {
     "output_summaries": "VF_OUTPUT_SUMMARIES",
     "output_shorts": "VF_OUTPUT_SHORTS",
     "archive": "VF_ARCHIVE",
-    "igc": "VF_IGC",
 }
 
 CONFIG_PATH = Path(os.environ.get("VF_CONFIG", "config.yml"))
@@ -125,5 +129,9 @@ def get_config() -> Config:
     data_dir = os.environ.get("VF_DATA_DIR")
     if data_dir:
         cfg.data_dir = data_dir
+
+    uploads_dir = os.environ.get("VF_UPLOADS_DIR")
+    if uploads_dir:
+        cfg.uploads_dir = uploads_dir
 
     return cfg

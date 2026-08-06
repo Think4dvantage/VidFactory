@@ -10,9 +10,12 @@ services:
       - /mnt/pg:/data
       # SQLite DB on a LOCAL volume (WAL mode is unsafe on the NFS share).
       - vf_data:/app/data
+      # Uploaded raw source video — local disk, independent of NAS availability.
+      - vf_uploads:/app/uploads
     environment:
       - PYTHONPYCACHEPREFIX=/tmp/pycache
       - VF_DATA_DIR=/app/data
+      - VF_UPLOADS_DIR=/app/uploads
       # Folder names on the share are lowercase.
       - VF_MUSIC=/data/music
       - VF_OUTPUT_SUMMARIES=/data/summaries
@@ -38,6 +41,7 @@ services:
 
 volumes:
   vf_data:
+  vf_uploads:
 
 networks:
   proxy:

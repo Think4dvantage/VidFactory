@@ -5,6 +5,15 @@
 > Deployed via `scripts/VF-dev.ps1 deploy` (SSH alias `xpsex` → `/opt/VidFactory`). Each milestone
 > was verified live on the host. Git branch `m0-foundation` (not pushed to a remote).
 > The editor streams a 720p proxy (`preview_file`) for smooth scrubbing.
+>
+> **Pivot (post-M4):** flight-log/IGC analytics (M1, M1+…M1++++ below) has been **removed from
+> VidFactory** and is becoming a separate "Flightlog" project/service with its own API. VidFactory
+> is now purely the video-production tool; `Project` is standalone (no more `Outing` dependency).
+> The M1* rows below are kept as history of what shipped and when — that code and its live data
+> (598 outings, 281 igc_tracks rows) are **not deleted from the DB**, just no longer referenced by
+> this app. See M1a below for the detach. The home NAS is also temporarily unavailable (house move),
+> hence M1a's upload path. `xpsex` (the old deploy host) is no longer available; deployment target
+> is TBD on a new host and the `Host setup (Fedora xpsex)` section below is stale until replaced.
 
 ### Shipped Milestones
 
@@ -22,17 +31,24 @@
 | M1+ | Flight-log polish: search/year/category/glider filters + sortable columns + pagination (`partials/outings_table.html`); 2-line rows (stats + buddies/comment). Managed dropdowns via a `lookups` table (migration 0003, seeded) in a "Manage Dropdown Data" modal; `launch_type` normalised `f/F→forward`, `r→reverse`. xlsx-import button replaced by **CSV export** (`importer` stays a CLI path). **Verified live.** |
 | M1++ | Flight-log analytics & logbook fields: dedicated **`/flightlog/stats`** page (records + year-over-year matrices: category×year, launch-type with reverse-% per year + overall, buddy×year, Hike&Fly totals/averages). **Flight buddies** (`buddies`+`outing_buddies`, migration 0004, seeded Tom/Ueli/Päsci/Simon/Johannes) as a per-outing multiselect, managed in the same modal. **Hike&Fly metrics** (`climb_m`/`hike_distance_km`/`hike_duration_min`) shown on the form only when category=Hike&Fly (toggled by `static/app.js`). **Verified live**: reverse share 34.6% (207/598); Hike&Fly 97 across years. |
 | M1+++ | **IGC track analysis** (Phase 1): per-outing IGC upload (edit → IGC track) saved to `VF_IGC` (`/data/igc`, on the `pg` share), analyzed by `core/igc.py` via **libigc** → `igc_tracks` aggregates: **cumulative climb across all thermals** (the headline ask — ≠ max−launch), thermal count, best/avg climb rate, max alt, glide count/distance, achieved glide ratio. Surfaced on the form, a table badge (🌀 N thermals · ↑m), and a "Climbs by year" rollup on the stats page. New runtime dep → Docker rebuild. A *thermal* = circling with **net climb** (paraglider tuning: libigc otherwise counts descending spirals). **Verified live** on 113 real 2019–21 tracks. |
-| M1++++ | **IGC bulk import** (Phase 2, `core/igc_import.py`): "📈 Import IGC" → dry-run modal classifies every unlinked file in `pg/igc` as a clean match (exactly 1 untracked outing + 1 file that date) or manual (multi-flight/multi-file/no-outing/already-tracked); one click imports the clean set. Idempotent. **Live state (full XContest library, 627 files): 281 flights auto-tracked, ~76 km cumulative climb, 574 thermals; ~124 multi-flight dates left for manual.** Device↔XContest duplicates were de-duped: 51 redundant device (`*-XTR-*.IGC`) files staged in `pg/igc/.device_dupes/`, 12 tracks re-pointed+re-analyzed to the XContest twin, 11 device-only 2019 sled rides kept. **Next (Phase 3): match multi-flight days (dedup same-flight files + time-ordered/manual assign).** |
+| M1++++ | **IGC bulk import** (Phase 2, `core/igc_import.py`): "📈 Import IGC" → dry-run modal classifies every unlinked file in `pg/igc` as a clean match (exactly 1 untracked outing + 1 file that date) or manual (multi-flight/multi-file/no-outing/already-tracked); one click imports the clean set. Idempotent. **Live state (full XContest library, 627 files): 281 flights auto-tracked, ~76 km cumulative climb, 574 thermals; ~124 multi-flight dates left for manual.** Device↔XContest duplicates were de-duped: 51 redundant device (`*-XTR-*.IGC`) files staged in `pg/igc/.device_dupes/`, 12 tracks re-pointed+re-analyzed to the XContest twin, 11 device-only 2019 sled rides kept. **(Phase 3, multi-flight-day matching, was never started — flight-log was extracted to its own project before that work began; superseded by M1a.)** |
+| M1a | **Detach from flight-log + local upload:** `Project` no longer depends on `Outing` — `outing_id`/relationship removed from the ORM (physical column + `outings` table left untouched in the live DB), replaced by nullable `date` + `external_flight_id` (opaque future reference, migration `0006`). All flight-log code/routes/templates deleted (`/flightlog*` now 404). New `core/flightlog_client.py` seam (`get_flight_metadata()`, `NotImplementedError`) is the documented plug point for the future Flightlog API. Dashboard gained a Projects list + "New Project" form as the new entry point (`POST /projects/new`). Added local-disk raw-video upload (`POST /api/projects/{id}/parts/upload`, chunked streaming to a new `vf_uploads` volume, `VF_UPLOADS_DIR`) since the NAS is unreachable post house-move; uploaded parts are kept indefinitely (new host has 55 TB). **Verified locally via TestClient** (project create → upload → SourcePart on disk); live-host verification pending the new deploy target. |
 
 ### Roadmap (ordered, not yet shipped)
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| M5 | YouTube artifacts: chapters from highlights, titles/descriptions (Outing-fed), release plan, aggregated credits → `metadata.json` for the MCP | chapters/titles match highlights; MCP consumes the file |
+| M5 | YouTube artifacts: chapters from highlights, titles/descriptions (fed by `core/flightlog_client.py` once the Flightlog API exists, or left blank until then), release plan, aggregated credits → `metadata.json` for the MCP | chapters/titles match highlights; MCP consumes the file |
+| Multi-user | Accounts/auth so the user's father-in-law can use the app independently; per-project `owner_id`, session auth, scoped job registry + storage paths | two independent accounts, each seeing only their own projects/jobs |
+| Host migration | Move deployment off the retired `xpsex` host onto the new (already-provisioned, 55 TB) host; revisit GPU/Traefik/compose specifics once host details are known | app deployed + verified live on the new host, `.ai/context/` deploy docs updated |
 
 ---
 
-## Host setup (Fedora `xpsex`) — needed for a fully green deploy
+## Host setup (Fedora `xpsex`) — STALE, host retired
+
+> `xpsex` is no longer available (home network/host changed after a move). Kept below only as a
+> record of the quirks that applied to it; do not deploy against it. The next deploy target is a
+> new host (55 TB storage, not yet detailed here) — see the "Host migration" roadmap item above.
 - **Mount the `pg` SMB share** at `/mnt/pg` (NAS exports only `/volume1/backup` over NFS; `pg` is
   SMB-only, so it needs CIFS credentials). Until mounted, `/data/{InstaOut,Music,Summaries,Shorts}`
   are missing and `/health` reports `degraded` (still HTTP 200; the app stays reachable). `Archive`
@@ -50,7 +66,9 @@
 
 - **Speech-AI auto-highlights** (Whisper + Silero VAD) — port `PS_VidAggregator/SpeechSegmentExtractor.ps1`;
   optional deps. Use case: a 3 h flight where only the spoken segments should be exposed.
-- **Remaining Flugbuch sheets** — Groundhandling, Tandemflüge, Fitnessprogramm, Ziele (kept in Excel for now).
 - **YTChannelMgmt-side reader** for the `metadata.json` handoff (lands in that repo).
 - **Multi-device / job-resume polish** — confirm a running job is visible from a second device after refresh.
 - **Linux/Fedora hardening** — reverse-proxy auth (Pocket-ID), backups of the SQLite DB on `Archive/`.
+
+(Flugbuch/flight-log-specific backlog items — remaining Excel sheets, multi-flight-day IGC
+matching, etc. — now belong to the separate Flightlog project, not here.)
