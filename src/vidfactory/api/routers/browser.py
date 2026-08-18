@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from vidfactory.api.auth_deps import require_user
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 from vidfactory.core import filebrowser
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_user)])
 
 
 @router.get("/browse/{root}", include_in_schema=False)

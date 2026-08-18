@@ -17,6 +17,13 @@
       <label class="flex items-center gap-1"><input type="radio" name="flight_type" value="normal_flight" {% if project.flight_type == 'normal_flight' %}checked{% endif %}> Normal flight</label>
       <label class="flex items-center gap-1"><input type="radio" name="flight_type" value="hike_and_fly" {% if project.flight_type == 'hike_and_fly' %}checked{% endif %}> Hike &amp; Fly</label>
     </form>
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mt-3 mb-2">Flightlog flight id</h2>
+    <form hx-post="/api/projects/{{ project.id }}/flightlog-id" hx-swap="none" class="flex gap-2 text-sm">
+      <input type="text" name="external_flight_id" value="{{ project.external_flight_id or '' }}"
+             placeholder="from your Flightlog flight page"
+             class="flex-1 rounded bg-slate-900 border border-slate-600 px-2 py-1">
+      <button class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1">Save</button>
+    </form>
   </section>
 
   <!-- Build -->

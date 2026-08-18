@@ -1,15 +1,18 @@
 # Architecture Reference
 
 This is the source-of-truth data model and contract for VidFactory. Update it whenever the schema,
-pipeline, or deployment changes. (No InfluxDB and no in-app auth — see `01-project-overview.md`;
-note in-app auth is now on the roadmap, see `features.md` "Multi-user".)
+pipeline, or deployment changes. (No InfluxDB. In-app auth **shipped** — see `features.md` M5b —
+opaque session-cookie login, two users max, no signup UI.)
 
 ## Core concept
 
-**Project is the top-level record.** Flight-log/logbook data (site, glider, date, IGC analytics)
-used to live in this app as the **Outing** table but has moved to a separate **Flightlog**
-project/service; `Project.external_flight_id` is an opaque, unenforced, currently-unused reference
-to that service's future API (`core/flightlog_client.py`), and `Project.date` is the app's own
+**Project is the top-level record**, owned by exactly one `User` (`owner_id`; M5b). Flight-log/
+logbook data (site, glider, date, IGC analytics) used to live in this app as the **Outing** table
+but has moved to a separate **Flightlog** project/service, which now exposes a live, frozen
+`/api/integration/v1` contract (M6). `Project.external_flight_id` (`TEXT`, matches Flightlog's own
+string flight id) is that service's flight id; `core/flightlog_client.py` calls it with the owning
+user's own `User.flightlog_api_key` (set on `/account`, never returned in any response) against
+`config.flightlog.base_url` / `VF_FLIGHTLOG_URL`. `Project.date` is the app's own
 minimal flight date (set at creation, editable). A **Highlight** is marked once on the assembled
 full-flight timeline and is the shared spine: it produces summary segments, YouTube chapters, and
 named-short sources. `launch` and `landing` are just Highlights with a `role` and are **optional**
@@ -26,7 +29,9 @@ named-short sources. `launch` and `landing` are just Highlights with a `role` an
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `projects` | `id`, `date` (nullable), `external_flight_id` (nullable, opaque — no FK), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | **top-level**; standalone (migration 0006 added `date`/`external_flight_id`, replacing the old `outing_id` FK — see Core concept above). Created via `POST /projects/new` |
+| `users` | `id`, `username`(unique), `password_hash`(`scrypt$salt$digest`), `flightlog_api_key`(nullable, plaintext bearer credential), `created_at` | No roles/signup UI — bootstrap user from `VF_BOOTSTRAP_USERNAME`/`_PASSWORD` at first boot, additional users via `scripts/create_user.py` |
+| `sessions` | `token`(PK, opaque), `user_id→users`, `created_at`, `expires_at` | ~30-day cookie session (`vf_session`, httponly); logout deletes the row |
+| `projects` | `id`, `owner_id→users`(nullable), `date` (nullable), `external_flight_id` (nullable `TEXT`, Flightlog's flight id — no FK, separate service), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | **top-level**; standalone (migration 0006 added `date`/`external_flight_id`, replacing the old `outing_id` FK; 0007 added `owner_id`; 0008 retyped `external_flight_id` to `TEXT` — see Core concept above). Created via `POST /projects/new`. A project not owned by the requesting user 404s (never 403) |
 | `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw source video parts (NAS-browsed **or uploaded**, see Storage & mounts), user-orderable |
 | `hikes` | `id`, `project_id→projects`, `sources`(json list), `speed_factor`(default 32.0) | H&F only; sped up and prepended to the full flight |
 | `highlights` | `id`, `project_id→projects`, `name`, `start`, `end`, `comment`, `type`('video'\|'picture'), `role`('normal'\|'launch'\|'landing'), `image_path`(nullable), `duration`(nullable, picture), `use_in_summary`(bool), `make_short`(bool) | **the spine**; times on the full-flight timeline. At most one `launch` and one `landing`, both optional |
@@ -79,22 +84,32 @@ user music/original ratio. Writes a credits `.txt` listing every track used.
 
 ---
 
-## API Contracts (implemented through M4)
+## API Contracts (implemented through M6)
 
 Pages return HTML (`include_in_schema=False`); mutations mostly reply `204 + HX-Redirect`; FFmpeg
-builds return `{job_id}` and stream progress over SSE. Routers under `api/routers/`:
+builds return `{job_id}` and stream progress over SSE. Every route except `GET /health` and
+`/static/*` requires login (`api/auth_deps.require_user`, a normal `Depends` so
+`app.dependency_overrides` reaches it in tests) — `/api/*` paths get a 401
+`{"error":{"code":"AUTH_REQUIRED",...}}` JSON body, page routes get a 303 redirect to `/login`.
+Routers under `api/routers/`:
 
-**main** — `GET /` dashboard · `GET /health` (liveness: 200 unless DB down; mounts reported as degraded).
+**main** — `GET /` dashboard (own projects/jobs only) · `GET /health` (liveness: 200 unless DB
+down; mounts reported as degraded; deliberately public — gates Traefik routing).
+
+**auth** — `GET/POST /login` · `POST /logout` · `GET /account` page + `POST
+/api/account/flightlog-key` (sets the current user's Flightlog API key; the page only ever shows
+"configured: yes/no", never the key itself).
 
 **browser** — `GET /browse/{root}` page · `GET /api/browse/{root}?path=` (HTMX listing) ·
-`GET /api/thumb/{root}?path=` (jpeg).
+`GET /api/thumb/{root}?path=` (jpeg). Login-gated but **not** ownership-scoped — the NAS/music
+mounts are shared household resources, not per-user.
 
 > Flight-log (`/flightlog*`) has been removed — see Core concept above and `features.md` M1a. There
 > is no `flightlog` router anymore; those routes 404.
 
 **projects** — `POST /projects/new` (create+redirect; optional `date` form field, defaults to today) ·
 `GET /projects/{id}` page · `GET /projects/{id}/editor` page ·
-flight-type/parts(add,upload,move,delete)/hike mutations ·
+flight-type/`flightlog-id`/parts(add,upload,move,delete)/hike mutations ·
 `POST /api/projects/{id}/parts/upload` (multipart, one or more files; streamed in 8 MB chunks to
 `VF_UPLOADS_DIR/{project_id}/`, then added as `SourcePart`s — the local-disk alternative to browsing
 the NAS) · `GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if
@@ -103,9 +118,25 @@ builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summar
 `GET /api/projects/{id}/status`.
 
 **sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result}`) ·
-`GET /api/jobs` · `POST /api/jobs/{id}/cancel`.
+`GET /api/jobs` · `POST /api/jobs/{id}/cancel`. All three scoped to the caller's own jobs
+(`core/jobs.Job.owner_id`, set when `registry.run()` is called) — a job that exists but belongs to
+someone else 404s, same as a project.
 
-**Not yet built (M5):** `youtube` router — generate/download `metadata.json` (chapters/titles/desc/release/credits).
+**youtube** (M5a, `core/youtube_meta.py`) — `GET /api/projects/{id}/youtube-metadata`: read-only,
+`response_model`-typed (visible in `/docs`, unlike the editor's internal JSON endpoints), 404 via the
+`07-api-conventions.md` `ENTITY_NOT_FOUND` error shape. Returns project fields + every `Highlight`
+(full-flight timestamps, ground truth) + `segment_order` (content order/cumulative duration from
+`highlights.merge_overlaps()` over `use_in_summary` highlights — **not** a rendered Summary.mp4
+timestamp, see the docstring in `models/youtube.py`) + every `Short` with `segments_used` and its
+resolved `source_highlight_name` (null for random-pool shorts). No `metadata.json` file is written —
+API-only per the live-pull model an external YouTube-management container uses; that container derives
+actual chapters/titles/descriptions itself from this raw data. **M6:** also `flight` +
+`flight_segments` (`models/flightlog.py`, mirrors Flightlog's contract verbatim) — best-effort;
+`None` whenever `external_flight_id`/the owner's API key isn't set or the Flightlog call errors,
+logged at INFO and never raised into this endpoint. `POST /api/projects/{id}/flightlog-link`
+(body `{youtube_url, label?}`) forwards to Flightlog's `PUT .../links/video/{project_id}` —
+called by the external YTChannelMgmt MCP once it actually publishes a video (VidFactory's own
+outputs are local files with no public URL, so there's no automatic trigger after a render).
 
 ---
 
@@ -118,8 +149,8 @@ is effectively unusable until it's back. Roots are env-configurable; actual fold
 
 | Env | Value | Use |
 |---|---|---|
-| `VF_VIDEOS` | `/data/InstaOut` | source video parts (read) — **NAS-dependent, currently down** |
-| `VF_MUSIC` | `/data/Music` | music library (read) — **not on the share yet** |
+| `VF_VIDEOS` | `/data/InstaOut` | source video parts (read) — **NAS-dependent, currently down**; local upload is the working alternative (see below) |
+| `VF_MUSIC` | `/data/music` | music library (read) — **not on the share yet**; standalone deploy bind-mounts a host folder instead (see below) |
 | `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + full-flight-with-music + credits (write) |
 | `VF_OUTPUT_SHORTS` | `/data/shorts` | shorts (write) |
 | `VF_ARCHIVE` | `/data/Archive` | metadata.json + credits (write) |
@@ -135,9 +166,29 @@ config `uploads_dir`) — deliberately **not** the NAS mount, since the whole po
 the NAS is unreachable. Layout: `{uploads_dir}/{project_id}/{filename}`. Uploaded parts are kept
 indefinitely (no cleanup-after-build); the new host has 55 TB, so this isn't a near-term concern.
 
+**Standalone deploy (M1b)** — `docker-compose.standalone.yml`, for running fully independently of
+the NAS/Traefik/`xpsex` while the real deploy host is TBD (see Deployment below). It bind-mounts two
+host folders instead of `/data`: `VF_MUSIC_HOST` (read-only, folder mode for `music.py`) → `VF_MUSIC`,
+and `VF_LIBRARY_HOST` → the four write roots (`VF_OUTPUT_FULLFLIGHTS/SUMMARIES/SHORTS`, `VF_ARCHIVE`)
+as subfolders, so finished output lands on a real host path instead of a docker volume. `VF_VIDEOS` is
+left unmounted (browse degrades to "missing", non-fatal; upload is the working path). Nothing in
+`config.py`/`music.py` changed — both already took arbitrary paths via env override; this is
+compose+env only. `.env.example` documents the two host-path vars (compose auto-loads `.env`).
+
 ---
 
 ## Deployment
+
+**This repo does not deploy itself.** It produces three things for whatever project/host actually
+runs the container: the image (built + pushed to GHCR by `.github/workflows/docker-publish.yml` on
+every `v*` tag — currently `ghcr.io/think4dvantage/vidfactory:latest`/`:0.2.0`), and two example
+config files to copy over — `docker-compose.standalone.yml` and `.env.example` (alongside the
+existing `config.yml.example`). The actual deploy target — a reachable Linux docker host, not
+`xpsex`, not the eventual 55 TB host, GPU = dedicated Intel card (QSV via `/dev/dri`; NVIDIA CDI
+device present in the example but commented out, no NVIDIA Container Toolkit there) — is managed
+from another project. No Traefik/`proxy` network in the example — it publishes `8000:8000` directly.
+See "Standalone deploy (M1b)" above for the mount rationale. `VF-dev.ps1` is unrelated to this path
+(still hardwired to `xpsex`, which is dead — see below).
 
 > **Stale — host retired.** Everything below (GPU/CDI specifics, Traefik labels, `xpsex` SSH deploy)
 > described the old Fedora XPS host, which is no longer reachable after a move. Deploy target is a

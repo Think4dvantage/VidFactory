@@ -15,6 +15,12 @@
       <a href="/" class="font-semibold text-sky-300">VidFactory</a>
       <a href="/" class="text-sm text-slate-300 hover:text-white">Dashboard</a>
       <a href="/browse/videos" class="text-sm text-slate-300 hover:text-white">Browse</a>
+      {% if request.state.user %}
+      <span class="ml-auto flex items-center gap-3 text-sm">
+        <a href="/account" class="text-slate-300 hover:text-white">{{ request.state.user.username }}</a>
+        <form method="post" action="/logout" class="inline"><button class="text-slate-400 hover:text-white">Logout</button></form>
+      </span>
+      {% endif %}
     </div>
   </nav>
   <main class="mx-auto max-w-6xl px-4 py-6">

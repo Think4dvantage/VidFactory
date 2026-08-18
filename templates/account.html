@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}VidFactory — Account{% endblock %}
+{% block content %}
+<div class="max-w-md">
+  <h1 class="text-xl font-semibold mb-4">Account</h1>
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Flightlog API key</h2>
+    <p class="text-sm text-slate-300 mb-2">
+      Status: {% if flightlog_key_set %}<span class="text-emerald-400">configured</span>{% else %}<span class="text-slate-500">not configured</span>{% endif %}
+    </p>
+    <p class="text-xs text-slate-500 mb-2">
+      Mint a key with the <code>flights:read</code> and <code>flight_links:write</code> scopes on
+      your Flightlog account, then paste it here. Never shown back once saved.
+    </p>
+    <form hx-post="/api/account/flightlog-key" hx-swap="none" class="flex gap-2">
+      <input type="password" name="api_key" placeholder="flg_..."
+             class="flex-1 rounded bg-slate-900 border border-slate-600 px-2 py-1 text-sm">
+      <button class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Save</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

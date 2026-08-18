@@ -4,20 +4,23 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from vidfactory import __version__
-from vidfactory.api.routers import browser, projects, sse
+from vidfactory.api.auth_deps import require_user
+from vidfactory.api.routers import auth, browser, projects, sse, youtube
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
+from vidfactory.core import auth as auth_core
 from vidfactory.core import filebrowser, gpu_detector
 from vidfactory.core import projects as projects_core
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine, init_db
+from vidfactory.database.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,8 @@ async def lifespan(app: FastAPI):
     logger.info("Config loaded: log_level=%s db=%s", cfg.app.log_level, cfg.db_path)
 
     init_db()
+    with Session(get_engine()) as db:
+        auth_core.ensure_bootstrap_user(db)
 
     mounts = filebrowser.check_mounts()
     for name, status in mounts.items():
@@ -52,13 +57,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VidFactory", version=__version__, lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(auth.router)
 app.include_router(browser.router)
 app.include_router(projects.router)
 app.include_router(sse.router)
+app.include_router(youtube.router)
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException):
+    # require_user() raises HTTPException(detail={"error": {...}}) for /api/* 401s, and
+    # detail=None + a Location header for page-route redirects — flatten the former to the
+    # project's existing error-envelope shape instead of Starlette's default {"detail": ...} wrap.
+    content = exc.detail if isinstance(exc.detail, dict) and "error" in exc.detail else {"detail": exc.detail}
+    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
 
 @app.get("/", include_in_schema=False)
-def index(request: Request, db: Session = Depends(get_db)):
+def index(request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     cfg = get_config()
     return templates.TemplateResponse(
         request,
@@ -68,8 +84,8 @@ def index(request: Request, db: Session = Depends(get_db)):
             "encoder": getattr(app.state, "encoder", "unknown"),
             "mounts": filebrowser.check_mounts(),
             "roots": cfg.mount_roots(),
-            "jobs": [j.public() for j in registry.list()],
-            "projects": projects_core.list_projects(db),
+            "jobs": [j.public() for j in registry.list(user.id)],
+            "projects": projects_core.list_projects(db, user.id),
         },
     )
 

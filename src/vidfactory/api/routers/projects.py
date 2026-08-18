@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
+from vidfactory.api.auth_deps import require_user
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 import re
@@ -20,12 +21,12 @@ from vidfactory.core.concat import build_preview, concatenate, plan as concat_pl
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
-from vidfactory.database.models import Project, Short
+from vidfactory.database.models import Project, Short, User
 from vidfactory.models.highlight import HighlightIn, HighlightOut
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_user)])
 
 
 def _video_files() -> list[str]:
@@ -58,17 +59,17 @@ def _redirect(project_id: int) -> Response:
 
 
 @router.post("/projects/new", include_in_schema=False)
-async def create_project(request: Request, db: Session = Depends(get_db)):
+async def create_project(request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     form = await request.form()
     date_str = str(form.get("date") or "")
     project_date = datetime.date.fromisoformat(date_str) if date_str else None
-    project = projects.create_project(db, date=project_date)
+    project = projects.create_project(db, user.id, date=project_date)
     return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
 
 @router.get("/projects/{project_id}", include_in_schema=False)
-def project_page(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+def project_page(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     videos_root = get_config().mount_roots()["videos"]
@@ -91,8 +92,8 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
 
 
 @router.get("/projects/{project_id}/editor", include_in_schema=False)
-def editor_page(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+def editor_page(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     if not project.full_flight_file:
@@ -106,8 +107,8 @@ def editor_page(project_id: int, request: Request, db: Session = Depends(get_db)
 
 
 @router.get("/api/projects/{project_id}/fullflight/video", include_in_schema=False)
-def fullflight_video(project_id: int, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
+def fullflight_video(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     # Prefer the lightweight 720p proxy for smooth scrubbing; fall back to the 4K source.
@@ -118,20 +119,20 @@ def fullflight_video(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/api/projects/{project_id}/preview/build", include_in_schema=False)
-def build_preview_ep(project_id: int, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
+def build_preview_ep(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     if not project.full_flight_file:
         return Response("Build the full flight first.", status_code=400)
-    job = registry.run("preview", _preview_target(project_id))
+    job = registry.run("preview", user.id, _preview_target(project_id, user.id))
     return {"job_id": job.id}
 
 
-def _preview_target(project_id: int):
+def _preview_target(project_id: int, owner_id: int):
     def target(job):
         with Session(get_engine()) as db:
-            project = projects.get_project(db, project_id)
+            project = projects.get_owned_project(db, project_id, owner_id)
             cfg = get_config()
             gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
             out = projects.preview_output_path(project)
@@ -147,21 +148,25 @@ def _preview_target(project_id: int):
 
 
 @router.get("/api/projects/{project_id}/highlights", include_in_schema=False)
-def list_highlights(project_id: int, db: Session = Depends(get_db)):
+def list_highlights(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
     rows = [HighlightOut.model_validate(h) for h in highlights.list_highlights(db, project_id)]
     return {"data": rows, "total": len(rows)}
 
 
 @router.post("/api/projects/{project_id}/highlights", include_in_schema=False)
-def create_highlight(project_id: int, payload: HighlightIn, db: Session = Depends(get_db)):
-    if db.get(Project, project_id) is None:
+def create_highlight(project_id: int, payload: HighlightIn, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
         return Response(status_code=404)
     h = highlights.create_highlight(db, project_id, payload.model_dump())
     return HighlightOut.model_validate(h)
 
 
 @router.post("/api/projects/{project_id}/highlights/{highlight_id}", include_in_schema=False)
-def update_highlight(project_id: int, highlight_id: int, payload: HighlightIn, db: Session = Depends(get_db)):
+def update_highlight(project_id: int, highlight_id: int, payload: HighlightIn, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
     h = highlights.update_highlight(db, highlight_id, payload.model_dump())
     if h is None:
         return Response(status_code=404)
@@ -169,14 +174,16 @@ def update_highlight(project_id: int, highlight_id: int, payload: HighlightIn, d
 
 
 @router.post("/api/projects/{project_id}/highlights/{highlight_id}/delete", include_in_schema=False)
-def delete_highlight(project_id: int, highlight_id: int, db: Session = Depends(get_db)):
+def delete_highlight(project_id: int, highlight_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
     highlights.delete_highlight(db, highlight_id)
     return Response(status_code=204)
 
 
 @router.post("/api/projects/{project_id}/flight-type", include_in_schema=False)
-async def set_flight_type(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def set_flight_type(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     form = await request.form()
@@ -184,9 +191,20 @@ async def set_flight_type(project_id: int, request: Request, db: Session = Depen
     return _redirect(project_id)
 
 
+@router.post("/api/projects/{project_id}/flightlog-id", include_in_schema=False)
+async def set_flightlog_id(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
+    if project is None:
+        return Response(status_code=404)
+    form = await request.form()
+    project.external_flight_id = str(form.get("external_flight_id") or "").strip() or None
+    db.commit()
+    return _redirect(project_id)
+
+
 @router.post("/api/projects/{project_id}/parts/add", include_in_schema=False)
-async def add_parts(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def add_parts(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     rels = (await request.form()).getlist("files")
@@ -201,8 +219,8 @@ _UPLOAD_CHUNK = 8 * 1024 * 1024
 
 
 @router.post("/api/projects/{project_id}/parts/upload", include_in_schema=False)
-async def upload_parts(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def upload_parts(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     form = await request.form()
@@ -226,8 +244,8 @@ async def upload_parts(project_id: int, request: Request, db: Session = Depends(
 
 
 @router.post("/api/projects/{project_id}/parts/{part_id}/move", include_in_schema=False)
-async def move_part(project_id: int, part_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def move_part(project_id: int, part_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     direction = str((await request.form()).get("dir", "up"))
@@ -236,14 +254,16 @@ async def move_part(project_id: int, part_id: int, request: Request, db: Session
 
 
 @router.post("/api/projects/{project_id}/parts/{part_id}/delete", include_in_schema=False)
-def delete_part(project_id: int, part_id: int, db: Session = Depends(get_db)):
+def delete_part(project_id: int, part_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
     projects.remove_part(db, part_id)
     return _redirect(project_id)
 
 
 @router.post("/api/projects/{project_id}/hike", include_in_schema=False)
-async def set_hike(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def set_hike(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     form = await request.form()
@@ -258,19 +278,19 @@ async def set_hike(project_id: int, request: Request, db: Session = Depends(get_
 
 
 @router.post("/api/projects/{project_id}/build", include_in_schema=False)
-def build_fullflight(project_id: int, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+def build_fullflight(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     if not project.source_parts:
         return Response("No source parts added.", status_code=400)
-    job = registry.run("concat", _build_target(project_id))
+    job = registry.run("concat", user.id, _build_target(project_id, user.id))
     return {"job_id": job.id}
 
 
 @router.get("/api/projects/{project_id}/concat-plan", include_in_schema=False)
-def concat_plan_partial(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+def concat_plan_partial(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     parts = [p.file for p in projects.ordered_parts(project)]
@@ -283,16 +303,16 @@ def concat_plan_partial(project_id: int, request: Request, db: Session = Depends
 
 
 @router.get("/api/projects/{project_id}/status", include_in_schema=False)
-def project_status(project_id: int, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
+def project_status(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     return {"full_flight_file": project.full_flight_file}
 
 
 @router.post("/api/projects/{project_id}/summary/build", include_in_schema=False)
-async def build_summary_ep(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def build_summary_ep(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     if not project.full_flight_file:
@@ -302,13 +322,13 @@ async def build_summary_ep(project_id: int, request: Request, db: Session = Depe
     music_path = str(form.get("music_path") or "")
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
-    job = registry.run("summary", _summary_target(project_id, target, music_path, mv, ov))
+    job = registry.run("summary", user.id, _summary_target(project_id, user.id, target, music_path, mv, ov))
     return {"job_id": job.id}
 
 
 @router.post("/api/projects/{project_id}/fullmusic/build", include_in_schema=False)
-async def build_fullmusic_ep(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def build_fullmusic_ep(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     if not project.full_flight_file:
@@ -319,13 +339,13 @@ async def build_fullmusic_ep(project_id: int, request: Request, db: Session = De
         return Response("Select music.", status_code=400)
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
-    job = registry.run("fullmusic", _fullmusic_target(project_id, music_path, mv, ov))
+    job = registry.run("fullmusic", user.id, _fullmusic_target(project_id, user.id, music_path, mv, ov))
     return {"job_id": job.id}
 
 
 @router.post("/api/projects/{project_id}/shorts/build", include_in_schema=False)
-async def build_shorts_ep(project_id: int, request: Request, db: Session = Depends(get_db)):
-    project = projects.get_project(db, project_id)
+async def build_shorts_ep(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     if not project.full_flight_file:
@@ -336,7 +356,7 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
     music_path = str(form.get("music_path") or "")
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
-    job = registry.run("shorts", _shorts_target(project_id, mode, count, music_path, mv, ov))
+    job = registry.run("shorts", user.id, _shorts_target(project_id, user.id, mode, count, music_path, mv, ov))
     return {"job_id": job.id}
 
 
@@ -366,10 +386,10 @@ def _next_short_path(project: Project) -> str:
     return str(root / f"{stem}_Short_{nn:02d}.mp4")
 
 
-def _shorts_target(project_id: int, mode: str, count: int, music_path: str, mv: float, ov: float):
+def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_path: str, mv: float, ov: float):
     def target(job):
         with Session(get_engine()) as db:
-            project = projects.get_project(db, project_id)
+            project = projects.get_owned_project(db, project_id, owner_id)
             full = project.full_flight_file
             cfg = get_config()
             sc = cfg.shorts
@@ -443,10 +463,10 @@ def _probe_fps(runner, file: str) -> str:
     return (streams[0].get("r_frame_rate") if streams else None) or "30"
 
 
-def _summary_target(project_id: int, target_seconds: float, music_path: str, mv: float, ov: float):
+def _summary_target(project_id: int, owner_id: int, target_seconds: float, music_path: str, mv: float, ov: float):
     def target(job):
         with Session(get_engine()) as db:
-            project = projects.get_project(db, project_id)
+            project = projects.get_owned_project(db, project_id, owner_id)
             full = project.full_flight_file
             cfg = get_config()
             runner = get_runner()
@@ -482,10 +502,10 @@ def _summary_target(project_id: int, target_seconds: float, music_path: str, mv:
     return target
 
 
-def _fullmusic_target(project_id: int, music_path: str, mv: float, ov: float):
+def _fullmusic_target(project_id: int, owner_id: int, music_path: str, mv: float, ov: float):
     def target(job):
         with Session(get_engine()) as db:
-            project = projects.get_project(db, project_id)
+            project = projects.get_owned_project(db, project_id, owner_id)
             full = project.full_flight_file
             cfg = get_config()
             runner = get_runner()
@@ -512,10 +532,10 @@ def _fullmusic_target(project_id: int, music_path: str, mv: float, ov: float):
     return target
 
 
-def _build_target(project_id: int):
+def _build_target(project_id: int, owner_id: int):
     def target(job):
         with Session(get_engine()) as db:
-            project = projects.get_project(db, project_id)
+            project = projects.get_owned_project(db, project_id, owner_id)
             parts = [p.file for p in projects.ordered_parts(project)]
             hike = project.hike
             use_hike = hike is not None and project.flight_type == "hike_and_fly"
@@ -533,7 +553,7 @@ def _build_target(project_id: int):
             project.full_flight_file = result["output"]
             db.commit()
             # Auto-build the 720p editor proxy in the background once the full flight exists.
-            registry.run("preview", _preview_target(project_id))
+            registry.run("preview", owner_id, _preview_target(project_id, owner_id))
             return result["output"]
 
     return target

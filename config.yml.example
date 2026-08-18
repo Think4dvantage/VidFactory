@@ -31,3 +31,8 @@ encode:
 music:
   music_volume: 0.35                # gain on music before mixing
   original_audio_volume: 1.0        # gain on original/clip audio
+
+flightlog:
+  # [VF_FLIGHTLOG_URL] Base URL of the separate Flightlog service's integration API, e.g.
+  # https://fl.lenti.cloud. Each user supplies their own API key on their /account page.
+  base_url: null

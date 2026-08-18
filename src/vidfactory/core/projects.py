@@ -13,33 +13,39 @@ from vidfactory.config import get_config
 from vidfactory.database.models import Hike, Project, SourcePart
 
 
-def get_project(db: Session, project_id: int) -> Project | None:
+def _project_query():
+    return select(Project).options(
+        selectinload(Project.source_parts),
+        selectinload(Project.hike),
+        selectinload(Project.highlights),
+        selectinload(Project.pools),
+        selectinload(Project.shorts),
+    )
+
+
+def get_owned_project(db: Session, project_id: int, owner_id: int) -> Project | None:
+    """A project not owned by `owner_id` is treated as not found (never 403) — same shape
+    Flightlog itself uses so ownership can't be probed via response differences."""
     return db.execute(
-        select(Project)
-        .options(
-            selectinload(Project.source_parts),
-            selectinload(Project.hike),
-            selectinload(Project.highlights),
-            selectinload(Project.pools),
-            selectinload(Project.shorts),
-        )
-        .where(Project.id == project_id)
+        _project_query().where(Project.id == project_id, Project.owner_id == owner_id)
     ).scalar_one_or_none()
 
 
-def list_projects(db: Session) -> list[Project]:
+def list_projects(db: Session, owner_id: int) -> list[Project]:
     return list(
         db.execute(
-            select(Project).order_by(Project.date.desc().nullslast(), Project.created_at.desc())
+            select(Project)
+            .where(Project.owner_id == owner_id)
+            .order_by(Project.date.desc().nullslast(), Project.created_at.desc())
         ).scalars()
     )
 
 
-def create_project(db: Session, date: datetime.date | None = None) -> Project:
-    project = Project(date=date or datetime.date.today(), flight_type="normal_flight")
+def create_project(db: Session, owner_id: int, date: datetime.date | None = None) -> Project:
+    project = Project(owner_id=owner_id, date=date or datetime.date.today(), flight_type="normal_flight")
     db.add(project)
     db.commit()
-    return get_project(db, project.id)
+    return get_owned_project(db, project.id, owner_id)
 
 
 def set_flight_type(db: Session, project: Project, flight_type: str) -> None:
@@ -92,8 +98,10 @@ def set_hike(db: Session, project: Project, sources: list[str], speed_factor: fl
 
 
 def _stem(project: Project) -> str:
+    # Project id is included because output roots are shared across all users' files — two
+    # pilots flying the same day would otherwise overwrite each other's outputs.
     date = project.date or project.created_at.date()
-    return date.strftime("%Y%m%d")
+    return f"{date.strftime('%Y%m%d')}_P{project.id}"
 
 
 def fullflight_output_path(project: Project) -> str:

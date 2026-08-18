@@ -37,6 +37,12 @@ class MusicSection(BaseModel):
     original_audio_volume: float = 1.0
 
 
+class FlightlogSection(BaseModel):
+    # Base URL of the separate Flightlog service's integration API (same instance for every
+    # VidFactory user — the per-pilot bit is the API key, stored on User.flightlog_api_key).
+    base_url: str | None = None
+
+
 class ShortsSection(BaseModel):
     # Caps chosen so a fully-loaded highlight short (hook + launch + flying*count + landing + CTA)
     # stays under ~30s: 6 + 4 + 3*3 + 4 + 3 = 26s.
@@ -65,6 +71,7 @@ class Config(BaseModel):
     encode: EncodeSection = Field(default_factory=EncodeSection)
     music: MusicSection = Field(default_factory=MusicSection)
     shorts: ShortsSection = Field(default_factory=ShortsSection)
+    flightlog: FlightlogSection = Field(default_factory=FlightlogSection)
 
     @property
     def db_path(self) -> Path:
@@ -133,5 +140,9 @@ def get_config() -> Config:
     uploads_dir = os.environ.get("VF_UPLOADS_DIR")
     if uploads_dir:
         cfg.uploads_dir = uploads_dir
+
+    flightlog_url = os.environ.get("VF_FLIGHTLOG_URL")
+    if flightlog_url:
+        cfg.flightlog.base_url = flightlog_url
 
     return cfg

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class Job:
     id: str
     kind: str
+    owner_id: int
     status: str = "pending"  # pending | running | done | error | cancelled
     stage: str = ""
     percent: float = 0.0
@@ -63,17 +64,21 @@ class JobRegistry:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def list(self) -> list[Job]:
+    def get_owned(self, job_id: str, owner_id: int) -> Optional[Job]:
+        job = self.get(job_id)
+        return job if job is not None and job.owner_id == owner_id else None
+
+    def list(self, owner_id: int) -> list[Job]:
         with self._lock:
-            return list(self._jobs.values())
+            return [j for j in self._jobs.values() if j.owner_id == owner_id]
 
     def active_count(self) -> int:
         with self._lock:
             return sum(1 for j in self._jobs.values() if j.status == "running")
 
-    def run(self, kind: str, target: Callable[[Job], Optional[str]]) -> Job:
+    def run(self, kind: str, owner_id: int, target: Callable[[Job], Optional[str]]) -> Job:
         """Create a job and run `target(job)` in a worker thread. `target` returns a result string."""
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind)
+        job = Job(id=uuid.uuid4().hex[:12], kind=kind, owner_id=owner_id)
         with self._lock:
             self._jobs[job.id] = job
 

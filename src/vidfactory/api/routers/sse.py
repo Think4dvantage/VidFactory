@@ -4,11 +4,13 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from vidfactory.api.auth_deps import require_user
 from vidfactory.core.jobs import registry
+from vidfactory.database.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -16,23 +18,26 @@ router = APIRouter()
 
 
 @router.get("/api/jobs", include_in_schema=False)
-def list_jobs():
-    return {"data": [j.public() for j in registry.list()], "total": len(registry.list())}
+def list_jobs(user: User = Depends(require_user)):
+    jobs = registry.list(user.id)
+    return {"data": [j.public() for j in jobs], "total": len(jobs)}
 
 
 @router.post("/api/jobs/{job_id}/cancel", include_in_schema=False)
-def cancel_job(job_id: str):
+def cancel_job(job_id: str, user: User = Depends(require_user)):
+    if registry.get_owned(job_id, user.id) is None:
+        return JSONResponse(status_code=404, content={"cancelled": False})
     ok = registry.cancel(job_id)
     return JSONResponse({"cancelled": ok})
 
 
 @router.get("/events/{job_id}")
-async def job_events(job_id: str):
+async def job_events(job_id: str, user: User = Depends(require_user)):
     """Stream a job's progress until it reaches a terminal state."""
 
     async def event_gen():
         while True:
-            job = registry.get(job_id)
+            job = registry.get_owned(job_id, user.id)
             if job is None:
                 yield {"event": "error", "data": json.dumps({"message": "unknown job"})}
                 return

@@ -1,0 +1,63 @@
+# EXAMPLE compose file for deploying VidFactory standalone — no Traefik, no NAS bind mount.
+# Meant to be copied into whatever project/host actually manages the deployment (this repo does
+# not deploy itself — it only produces the image via .github/workflows/docker-publish.yml, this
+# example, and config.yml.example / .env.example). Copy all three into the deploying project,
+# fill in real values, adjust image tag as needed.
+#
+# Usage on the target host:
+#   cp config.yml.example config.yml
+#   cp .env.example .env      # fill in VF_MUSIC_HOST / VF_LIBRARY_HOST for that host
+#   docker compose -f docker-compose.standalone.yml up -d
+#   curl http://localhost:8000/health
+#
+# A YouTube-management container on the same host reads highlight/short/segment metadata from
+# GET http://<this-host>:8000/api/projects/{id}/youtube-metadata — published port, no extra
+# docker network needed as long as both containers run on this host.
+
+services:
+  vidfactory:
+    image: ghcr.io/think4dvantage/vidfactory:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      # SQLite DB — must be local (WAL mode does not work over NFS/SMB).
+      - vf_data:/app/data
+      # Uploaded raw source video — local disk, independent of NAS availability.
+      - vf_uploads:/app/uploads
+      # Music library — read-only bind mount of a folder on this docker host.
+      - ${VF_MUSIC_HOST}:/app/music:ro
+      # Produced outputs (full flights, summaries, shorts) + archive/credits — bind mount so
+      # finished files land on a real host folder instead of being buried in a docker volume.
+      - ${VF_LIBRARY_HOST}:/app/library
+    environment:
+      - VF_DATA_DIR=/app/data
+      - VF_UPLOADS_DIR=/app/uploads
+      - VF_MUSIC=/app/music
+      - VF_OUTPUT_FULLFLIGHTS=/app/library/fullflights
+      - VF_OUTPUT_SUMMARIES=/app/library/summaries
+      - VF_OUTPUT_SHORTS=/app/library/shorts
+      - VF_ARCHIVE=/app/library/archive
+      # First-boot bootstrap account — see .env.example. Only used once, while `users` is empty.
+      - VF_BOOTSTRAP_USERNAME=${VF_BOOTSTRAP_USERNAME}
+      - VF_BOOTSTRAP_PASSWORD=${VF_BOOTSTRAP_PASSWORD}
+      # Base URL of the separate Flightlog service's integration API. Leave ${VF_FLIGHTLOG_URL}
+      # unset in .env to disable the integration entirely.
+      - VF_FLIGHTLOG_URL=${VF_FLIGHTLOG_URL}
+    # GPU: Intel QSV via /dev/dri is active (dedicated Intel card on this host). NVIDIA NVENC is
+    # left commented out — requesting nvidia.com/gpu=all with no NVIDIA Container Toolkit/CDI spec
+    # on the host fails container startup outright. Uncomment once this moves to an NVIDIA host.
+    devices:
+      - /dev/dri:/dev/dri
+      # - nvidia.com/gpu=all
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  vf_data:
+  vf_uploads:

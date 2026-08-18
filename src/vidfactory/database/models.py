@@ -12,16 +12,46 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """A VidFactory account. No roles — every user has full access to their own projects only."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # Plaintext: it's a bearer credential VidFactory must resend verbatim on every Flightlog call,
+    # not a password — nothing to hash it against. Never returned in any API response body.
+    flightlog_api_key: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    projects: Mapped[list["Project"]] = relationship(back_populates="owner")
+
+
+class Session(Base):
+    """An opaque session token issued at login (see `core/auth.py`)."""
+
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    user: Mapped[User] = relationship()
+
+
 class Project(Base):
     """The video work for a flight. Standalone — flight-log metadata (site/glider/date) lives in a
-    separate Flightlog service; `external_flight_id` is an opaque, unenforced future reference to
-    it (see `core/flightlog_client.py`)."""
+    separate Flightlog service; `external_flight_id` is that service's flight id (see
+    `core/flightlog_client.py`)."""
 
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     date: Mapped[Date_ | None] = mapped_column(Date)
-    external_flight_id: Mapped[int | None] = mapped_column(Integer)
+    external_flight_id: Mapped[str | None] = mapped_column(String)
     flight_type: Mapped[str] = mapped_column(String, default="normal_flight")  # | 'hike_and_fly'
     full_flight_file: Mapped[str | None] = mapped_column(String)
     preview_file: Mapped[str | None] = mapped_column(String)  # 720p editor proxy
@@ -30,6 +60,7 @@ class Project(Base):
     youtube_metadata_file: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    owner: Mapped[User | None] = relationship(back_populates="projects")
     source_parts: Mapped[list["SourcePart"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
