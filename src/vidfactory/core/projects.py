@@ -82,18 +82,27 @@ def move_part(db: Session, project: Project, part_id: int, direction: str) -> No
         db.commit()
 
 
-def set_hike(db: Session, project: Project, sources: list[str], speed_factor: float) -> None:
+def add_hike_sources(db: Session, project: Project, files: list[str], speed_factor: float) -> None:
+    """Append uploaded hike-footage files and update the speed factor (there's no NAS browser to
+    pick from any more — files arrive via upload, so this always appends rather than replacing)."""
     hike = project.hike
-    if not sources:
-        if hike:
-            db.delete(hike)
-            db.commit()
-        return
     if hike is None:
-        hike = Hike(project_id=project.id)
+        hike = Hike(project_id=project.id, sources=[])
         db.add(hike)
-    hike.sources = sources
+    if files:
+        hike.sources = list(hike.sources) + files
     hike.speed_factor = speed_factor
+    db.commit()
+
+
+def remove_hike_source(db: Session, project: Project, index: int) -> None:
+    hike = project.hike
+    if hike is None:
+        return
+    sources = list(hike.sources)
+    if 0 <= index < len(sources):
+        del sources[index]
+    hike.sources = sources
     db.commit()
 
 

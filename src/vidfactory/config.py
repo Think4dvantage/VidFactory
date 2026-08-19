@@ -19,7 +19,8 @@ class FFmpegSection(BaseModel):
 
 
 class MountsSection(BaseModel):
-    videos: str = "/data/InstaOut"
+    # No `videos` root any more — the NAS it lived on is unreachable for the next year; all
+    # source footage comes in through /api/projects/{id}/parts/upload instead.
     music: str = "/data/music"
     output_fullflights: str = "/data/fullflights"
     output_summaries: str = "/data/summaries"
@@ -92,7 +93,6 @@ class Config(BaseModel):
     def mount_roots(self) -> dict[str, Path]:
         """name -> Path for every configured storage root."""
         return {
-            "videos": Path(self.mounts.videos),
             "music": Path(self.mounts.music),
             "output_fullflights": Path(self.mounts.output_fullflights),
             "output_summaries": Path(self.mounts.output_summaries),
@@ -106,7 +106,6 @@ class Config(BaseModel):
 
 # Environment overrides for the storage roots (handy in docker-compose / .env).
 _ENV_MOUNT_KEYS = {
-    "videos": "VF_VIDEOS",
     "music": "VF_MUSIC",
     "output_fullflights": "VF_OUTPUT_FULLFLIGHTS",
     "output_summaries": "VF_OUTPUT_SUMMARIES",

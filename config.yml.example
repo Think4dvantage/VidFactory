@@ -16,8 +16,9 @@ ffmpeg:
   resources_dir: resources
 
 # Storage roots. In Docker these are subfolders of the mounted //172.18.10.10/pg share (/data).
+# No `videos` root — the NAS is unreachable for the next year; source footage is uploaded
+# instead (POST /api/projects/{id}/parts/upload), not browsed.
 mounts:
-  videos: /data/InstaOut            # [VF_VIDEOS]   source video parts (read)
   music: /data/music                # [VF_MUSIC]    music library (read)
   output_fullflights: /data/fullflights # [VF_OUTPUT_FULLFLIGHTS] concatenated full flights (write)
   output_summaries: /data/summaries # [VF_OUTPUT_SUMMARIES] summaries + full-flight-with-music (write)

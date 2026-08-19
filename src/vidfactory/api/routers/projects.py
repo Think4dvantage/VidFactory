@@ -15,7 +15,7 @@ from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 import re
 
-from vidfactory.core import filebrowser, gpu_detector, highlights, music, projects, summary
+from vidfactory.core import filebrowser, flightlog_hints, gpu_detector, highlights, music, projects, summary
 from vidfactory.core import shorts as shorts_engine
 from vidfactory.core.concat import build_preview, concatenate, plan as concat_plan
 from vidfactory.core.ffmpeg_runner import get_runner
@@ -27,15 +27,6 @@ from vidfactory.models.highlight import HighlightIn, HighlightOut
 logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_user)])
-
-
-def _video_files() -> list[str]:
-    """Flat list of source video filenames under the videos root (InstaOut)."""
-    try:
-        listing = filebrowser.list_dir("videos", "")
-    except filebrowser.PathNotAllowed:
-        return []
-    return [e["rel"] for e in listing["entries"] if e["kind"] == "video"]
 
 
 def _music_entries() -> list[dict]:
@@ -72,7 +63,6 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
     project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
-    videos_root = get_config().mount_roots()["videos"]
     return templates.TemplateResponse(
         request,
         "project.html",
@@ -80,8 +70,6 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
             "project": project,
             "parts": projects.ordered_parts(project),
             "hike": project.hike,
-            "instaout_files": _video_files(),
-            "videos_root": str(videos_root),
             "music_entries": _music_entries(),
             "music_defaults": get_config().music,
             "highlight_count": len(project.highlights),
@@ -147,6 +135,17 @@ def _preview_target(project_id: int, owner_id: int):
     return target
 
 
+@router.get("/api/projects/{project_id}/flightlog-hints", include_in_schema=False)
+def get_flightlog_hints(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Segment-derived timeline hints (thermal starts, etc.) for the highlight editor — see
+    core/flightlog_hints.py. `{"status": "no_launch_marked"|"unavailable"|"ok", "hints": [...]}`,
+    never an error: the editor treats this as a best-effort overlay, not a hard dependency."""
+    project = projects.get_owned_project(db, project_id, user.id)
+    if project is None:
+        return Response(status_code=404)
+    return flightlog_hints.get_hints(db, project)
+
+
 @router.get("/api/projects/{project_id}/highlights", include_in_schema=False)
 def list_highlights(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     if projects.get_owned_project(db, project_id, user.id) is None:
@@ -202,19 +201,6 @@ async def set_flightlog_id(project_id: int, request: Request, db: Session = Depe
     return _redirect(project_id)
 
 
-@router.post("/api/projects/{project_id}/parts/add", include_in_schema=False)
-async def add_parts(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    project = projects.get_owned_project(db, project_id, user.id)
-    if project is None:
-        return Response(status_code=404)
-    rels = (await request.form()).getlist("files")
-    root = get_config().mount_roots()["videos"]
-    files = [str(root / rel) for rel in rels if rel]
-    if files:
-        projects.add_parts(db, project, files)
-    return _redirect(project_id)
-
-
 _UPLOAD_CHUNK = 8 * 1024 * 1024
 
 
@@ -261,19 +247,44 @@ def delete_part(project_id: int, part_id: int, db: Session = Depends(get_db), us
     return _redirect(project_id)
 
 
-@router.post("/api/projects/{project_id}/hike", include_in_schema=False)
-async def set_hike(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+@router.post("/api/projects/{project_id}/hike/upload", include_in_schema=False)
+async def upload_hike(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
     form = await request.form()
-    root = get_config().mount_roots()["videos"]
-    sources = [str(root / rel) for rel in form.getlist("sources") if rel]
+    files = [f for f in form.getlist("sources") if hasattr(f, "filename") and f.filename]
     try:
         speed = float(form.get("speed_factor", "1.0") or "1.0")
     except ValueError:
         speed = 1.0
-    projects.set_hike(db, project, sources, speed)
+    saved: list[str] = []
+    if files:
+        dest_dir = get_config().uploads_dir_path / str(project_id) / "hike"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            name = Path(f.filename).name
+            dest = dest_dir / name
+            if dest.exists():
+                dest = dest_dir / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+            with dest.open("wb") as out:
+                while chunk := await f.read(_UPLOAD_CHUNK):
+                    out.write(chunk)
+            saved.append(str(dest))
+    projects.add_hike_sources(db, project, saved, speed)
+    return _redirect(project_id)
+
+
+@router.post("/api/projects/{project_id}/hike/remove", include_in_schema=False)
+async def remove_hike_source(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
+    if project is None:
+        return Response(status_code=404)
+    try:
+        index = int((await request.form()).get("index", "-1"))
+    except ValueError:
+        index = -1
+    projects.remove_hike_source(db, project, index)
     return _redirect(project_id)
 
 

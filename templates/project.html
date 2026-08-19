@@ -64,20 +64,9 @@
     {% endfor %}
   </ol>
   {% else %}
-  <p class="text-slate-400 text-sm mb-3">No parts yet. Add from InstaOut below.</p>
+  <p class="text-slate-400 text-sm mb-3">No parts yet. Upload footage below.</p>
   {% endif %}
 
-  <form hx-post="/api/projects/{{ project.id }}/parts/add" hx-swap="none">
-    <div class="max-h-48 overflow-y-auto border border-slate-700 rounded p-2 text-sm grid sm:grid-cols-2 gap-x-4">
-      {% for f in instaout_files %}
-      <label class="flex items-center gap-1"><input type="checkbox" name="files" value="{{ f }}"> {{ f }}</label>
-      {% endfor %}
-      {% if not instaout_files %}<span class="text-slate-400">No videos found in {{ videos_root }}</span>{% endif %}
-    </div>
-    <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Add selected parts</button>
-  </form>
-
-  <p class="text-xs uppercase tracking-wide text-slate-400 mt-4 mb-2">Or upload raw video (when the NAS isn't reachable)</p>
   <form hx-post="/api/projects/{{ project.id }}/parts/upload" hx-encoding="multipart/form-data" hx-swap="none">
     <input type="file" name="files" multiple accept="video/*"
            class="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-slate-200 hover:file:bg-slate-600">
@@ -90,18 +79,28 @@
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
   <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Hike (prepended)</h2>
   <p class="text-xs text-slate-500 mb-2">Footage exported already time-lapsed → speed 1.0 (just prepend). Set a factor &gt; 1 to speed raw footage in-tool.</p>
-  <form hx-post="/api/projects/{{ project.id }}/hike" hx-swap="none">
-    <div class="max-h-40 overflow-y-auto border border-slate-700 rounded p-2 text-sm grid sm:grid-cols-2 gap-x-4">
-      {% set hike_srcs = hike.sources if hike else [] %}
-      {% for f in instaout_files %}
-      <label class="flex items-center gap-1"><input type="checkbox" name="sources" value="{{ f }}"
-        {% if (videos_root ~ '/' ~ f) in hike_srcs %}checked{% endif %}> {{ f }}</label>
-      {% endfor %}
-    </div>
+  {% if hike and hike.sources %}
+  <ol class="text-sm divide-y divide-slate-700/60 mb-3">
+    {% for f in hike.sources %}
+    <li class="flex items-center justify-between py-1">
+      <span>{{ loop.index }}. {{ f.split('/')[-1] }}</span>
+      <form hx-post="/api/projects/{{ project.id }}/hike/remove" hx-swap="none">
+        <input type="hidden" name="index" value="{{ loop.index0 }}">
+        <button class="rounded bg-rose-800 hover:bg-rose-700 px-2">✕</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="text-slate-400 text-sm mb-3">No hike footage uploaded yet.</p>
+  {% endif %}
+  <form hx-post="/api/projects/{{ project.id }}/hike/upload" hx-encoding="multipart/form-data" hx-swap="none">
+    <input type="file" name="sources" multiple accept="video/*"
+           class="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-slate-200 hover:file:bg-slate-600">
     <label class="flex items-center gap-2 text-sm mt-2">Speed factor
       <input type="number" step="0.1" min="1" name="speed_factor" value="{{ hike.speed_factor if hike else 1.0 }}"
              class="w-24 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
-    <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Save hike</button>
+    <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Upload &amp; save</button>
   </form>
 </section>
 {% endif %}

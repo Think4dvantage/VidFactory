@@ -64,6 +64,14 @@ libx264**. `FONTCONFIG_FILE` points at `resources/fonts.conf` so `drawtext` reso
 4K full flight) for smooth browser scrubbing; built by `concat.build_preview` (short GOP + faststart)
 automatically after the full flight, or on demand. IN/OUT marks map 1:1 to the 4K source.
 
+**Flightlog timeline hints (M8):** the editor canvas (`static/editor.js`) also overlays
+Flightlog-derived markers — thermal starts today, any future `SegmentOut.kind` automatically (no
+hardcoding, see `core/flightlog_hints.py`). Anchored on the pilot's own `launch` highlight (its
+`start` = takeoff on the video timeline; Flightlog's `start_offset_s` is seconds-since-takeoff with
+no camera-start concept of its own), so hints only appear once a launch highlight exists —
+`GET /api/projects/{id}/flightlog-hints` reports `no_launch_marked` until then. Hover a marker for
+a tooltip (kind/alt-change/climb-rate), click near one to seek exactly to it.
+
 3. **Shorts** (`shorts.py`) — all clips trimmed from the **full flight**, normalized to vertical
    1080×1920 (horizontal source: `crop=ih*9/16:ih…,scale=1080:1920`; **`setsar=1:1`+`fps=30` on every
    stream**; one `-i` per clip; CTA = looped image + `anullsrc`).
@@ -101,19 +109,26 @@ down; mounts reported as degraded; deliberately public — gates Traefik routing
 "configured: yes/no", never the key itself).
 
 **browser** — `GET /browse/{root}` page · `GET /api/browse/{root}?path=` (HTMX listing) ·
-`GET /api/thumb/{root}?path=` (jpeg). Login-gated but **not** ownership-scoped — the NAS/music
-mounts are shared household resources, not per-user.
+`GET /api/thumb/{root}?path=` (jpeg). Login-gated but **not** ownership-scoped — the music mount is
+a shared household resource, not per-user. **M7:** `videos` is no longer a browsable root at all
+(see Storage & mounts) — `music` is the only one left.
 
 > Flight-log (`/flightlog*`) has been removed — see Core concept above and `features.md` M1a. There
 > is no `flightlog` router anymore; those routes 404.
 
 **projects** — `POST /projects/new` (create+redirect; optional `date` form field, defaults to today) ·
 `GET /projects/{id}` page · `GET /projects/{id}/editor` page ·
-flight-type/`flightlog-id`/parts(add,upload,move,delete)/hike mutations ·
+flight-type/`flightlog-id`/parts(upload,move,delete)/hike(`upload`,`remove`) mutations ·
 `POST /api/projects/{id}/parts/upload` (multipart, one or more files; streamed in 8 MB chunks to
-`VF_UPLOADS_DIR/{project_id}/`, then added as `SourcePart`s — the local-disk alternative to browsing
-the NAS) · `GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if
+`VF_UPLOADS_DIR/{project_id}/`, then added as `SourcePart`s — the **only** way to get source
+footage in, see Storage & mounts) · `POST /api/projects/{id}/hike/upload` (multipart, same chunked
+upload to `VF_UPLOADS_DIR/{project_id}/hike/`, appends to `Hike.sources` + sets `speed_factor`) ·
+`POST /api/projects/{id}/hike/remove` (form `index`, removes one `Hike.sources` entry by position) ·
+`GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if
 present) · highlight CRUD `GET/POST /api/projects/{id}/highlights[/{hid}[/delete]]` (JSON) ·
+`GET /api/projects/{id}/flightlog-hints` (M8, `core/flightlog_hints.py`) — segment-derived timeline
+hints for the highlight editor, `{"status": "no_launch_marked"|"unavailable"|"ok", "hints": [...]}`;
+never errors, always 200 (see Core concept / Storage & mounts style best-effort pattern) ·
 builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/build,shorts/build}` ·
 `GET /api/projects/{id}/status`.
 
@@ -143,13 +158,12 @@ outputs are local files with no public URL, so there's no automatic trigger afte
 ## Storage & mounts
 
 The share `//172.18.10.10/pg` is **NFS-mounted** on the (now-retired) Fedora host at `/mnt/pg` and
-bound into the container at `/data`. **This NAS is currently unreachable** (home network/host
-changed after a move) — the app degrades gracefully (see health check below), but `VF_VIDEOS` browse
-is effectively unusable until it's back. Roots are env-configurable; actual folder names on the share:
+bound into the container at `/data`. **This NAS is unreachable for the next year** (home
+network/host changed after a move) — see M7 below. Roots are env-configurable; actual folder names
+on the share:
 
 | Env | Value | Use |
 |---|---|---|
-| `VF_VIDEOS` | `/data/InstaOut` | source video parts (read) — **NAS-dependent, currently down**; local upload is the working alternative (see below) |
 | `VF_MUSIC` | `/data/music` | music library (read) — **not on the share yet**; standalone deploy bind-mounts a host folder instead (see below) |
 | `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + full-flight-with-music + credits (write) |
 | `VF_OUTPUT_SHORTS` | `/data/shorts` | shorts (write) |
@@ -163,8 +177,17 @@ reported as `degraded` (HTTP 200, app stays reachable) — see `08-operability.m
 
 **Uploaded raw video** lives on its own LOCAL docker volume, `vf_uploads` (`VF_UPLOADS_DIR=/app/uploads`,
 config `uploads_dir`) — deliberately **not** the NAS mount, since the whole point is to work while
-the NAS is unreachable. Layout: `{uploads_dir}/{project_id}/{filename}`. Uploaded parts are kept
+the NAS is unreachable. Layout: `{uploads_dir}/{project_id}/{filename}` for ordinary source parts,
+`{uploads_dir}/{project_id}/hike/{filename}` for Hike & Fly footage. Uploaded parts are kept
 indefinitely (no cleanup-after-build); the new host has 55 TB, so this isn't a near-term concern.
+
+**M7 (2026-08-19): the `videos`/`VF_VIDEOS` mount root is gone entirely** — the NAS it pointed at
+(`InstaOut`) won't be reachable for the next year, so `config.MountsSection` no longer has a
+`videos` field and `mount_roots()`/`check_mounts()` never mention it. Upload
+(`POST /api/projects/{id}/parts/upload`, above) is now the **only** way to add source footage —
+there is no NAS-browse fallback any more, not a degraded one. The generic `browser`/`filebrowser`
+mechanism itself is untouched and still serves `music` (see `## API Contracts` → **browser**),
+which was already local-only in the standalone deploy and unaffected by the NAS being gone.
 
 **Standalone deploy (M1b)** — `docker-compose.standalone.yml`, for running fully independently of
 the NAS/Traefik/`xpsex` while the real deploy host is TBD (see Deployment below). It bind-mounts two

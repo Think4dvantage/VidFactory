@@ -10,8 +10,22 @@
 
   let highlights = [];
   let inT = null, outT = null;
+  let hints = [];
 
   const ROLE_COLOR = { normal: "#0ea5e9", launch: "#10b981", landing: "#f43f5e" };
+
+  // Flightlog segment kinds -> marker style. Unknown/future kinds fall back to DEFAULT_HINT_STYLE
+  // so new segment kinds from Flightlog show up immediately with no code change here.
+  const HINT_STYLE = {
+    thermal: { color: "#f59e0b", icon: "🌀", label: "Thermal" },
+    glide: { color: "#38bdf8", icon: "🪂", label: "Glide" },
+    takeoff: { color: "#10b981", icon: "🛫", label: "Takeoff" },
+    landing: { color: "#f43f5e", icon: "🛬", label: "Landing" },
+    max_alt: { color: "#a78bfa", icon: "⬆️", label: "Max altitude" },
+    top_of_climb: { color: "#facc15", icon: "🔝", label: "Top of climb" },
+  };
+  const DEFAULT_HINT_STYLE = { color: "#94a3b8", icon: "●", label: "Flightlog hint" };
+  const hintStyle = (kind) => HINT_STYLE[kind] || DEFAULT_HINT_STYLE;
   const fmt = (s) => {
     if (s == null || isNaN(s)) return "—";
     s = Math.max(0, s);
@@ -25,6 +39,27 @@
     highlights = (await r.json()).data || [];
     log("loaded", highlights.length, "highlights");
     renderList();
+    draw();
+    loadHints(); // independent of the highlight list; re-checked every load (e.g. after marking launch)
+  }
+
+  async function loadHints() {
+    const statusEl = document.getElementById("hint-status");
+    try {
+      const r = await fetch(`/api/projects/${pid}/flightlog-hints`);
+      const data = await r.json();
+      hints = data.hints || [];
+      if (data.status === "no_launch_marked") {
+        statusEl.textContent = "Mark a launch highlight to see Flightlog hints (thermals, etc.) on the timeline.";
+      } else if (data.status === "ok" && hints.length) {
+        statusEl.textContent = `${hints.length} Flightlog hint(s) on the timeline — hover the markers above it.`;
+      } else {
+        statusEl.textContent = "";
+      }
+    } catch (e) {
+      hints = [];
+      statusEl.textContent = "";
+    }
     draw();
   }
 
@@ -60,6 +95,16 @@
       const ww = Math.max(2, ((hl.end - hl.start) / dur) * w);
       ctx.fillStyle = ROLE_COLOR[hl.role] || ROLE_COLOR.normal;
       ctx.fillRect(x, 6, ww, h - 20);
+    });
+    hints.forEach((hint) => {
+      const x = (hint.video_offset_s / dur) * w;
+      ctx.fillStyle = hintStyle(hint.kind).color;
+      ctx.beginPath();
+      ctx.moveTo(x - 4, 0);
+      ctx.lineTo(x + 4, 0);
+      ctx.lineTo(x, 7);
+      ctx.closePath();
+      ctx.fill();
     });
     if (inT != null && outT != null && outT > inT) {
       ctx.fillStyle = "rgba(245,158,11,0.5)";
@@ -141,8 +186,40 @@
     const dur = player.duration || 0;
     if (!dur) return;
     const rect = canvas.getBoundingClientRect();
-    player.currentTime = ((e.clientX - rect.left) / rect.width) * dur;
+    const mx = e.clientX - rect.left;
+    let target = (mx / rect.width) * dur;
+    const nearest = nearestHint(mx, rect.width, dur, 6);
+    if (nearest) target = nearest.video_offset_s;
+    player.currentTime = target;
   });
+
+  function nearestHint(mx, width, dur, thresholdPx) {
+    let best = null, bestDist = thresholdPx;
+    hints.forEach((hint) => {
+      const x = (hint.video_offset_s / dur) * width;
+      const dist = Math.abs(x - mx);
+      if (dist < bestDist) { best = hint; bestDist = dist; }
+    });
+    return best;
+  }
+
+  canvas.addEventListener("mousemove", (e) => {
+    const dur = player.duration || 0;
+    const tooltip = document.getElementById("hint-tooltip");
+    if (!dur || !hints.length) { tooltip.classList.add("hidden"); return; }
+    const rect = canvas.getBoundingClientRect();
+    const nearest = nearestHint(e.clientX - rect.left, rect.width, dur, 6);
+    if (!nearest) { tooltip.classList.add("hidden"); return; }
+    const style = hintStyle(nearest.kind);
+    let extra = "";
+    if (nearest.alt_change_m != null) extra += ` · ${nearest.alt_change_m.toFixed(0)}m`;
+    if (nearest.vertical_velocity_ms != null) extra += ` · ${nearest.vertical_velocity_ms.toFixed(1)}m/s`;
+    tooltip.textContent = `${style.icon} ${style.label} @ ${fmt(nearest.video_offset_s)}${extra}`;
+    tooltip.style.left = `${e.clientX + 10}px`;
+    tooltip.style.top = `${e.clientY - 28}px`;
+    tooltip.classList.remove("hidden");
+  });
+  canvas.addEventListener("mouseleave", () => document.getElementById("hint-tooltip").classList.add("hidden"));
 
   document.addEventListener("keydown", (e) => {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
