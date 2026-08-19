@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from vidfactory.api.auth_deps import require_user
@@ -15,7 +15,7 @@ from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 import re
 
-from vidfactory.core import filebrowser, flightlog_hints, gpu_detector, highlights, music, projects, summary
+from vidfactory.core import chunked_upload, filebrowser, flightlog_hints, gpu_detector, highlights, music, projects, summary
 from vidfactory.core import shorts as shorts_engine
 from vidfactory.core.concat import build_preview, concatenate, plan as concat_plan
 from vidfactory.core.ffmpeg_runner import get_runner
@@ -201,32 +201,77 @@ async def set_flightlog_id(project_id: int, request: Request, db: Session = Depe
     return _redirect(project_id)
 
 
-_UPLOAD_CHUNK = 8 * 1024 * 1024
+def _staging_dir(project_id: int, *, hike: bool = False) -> Path:
+    base = get_config().uploads_dir_path / str(project_id)
+    return (base / "hike" / ".staging") if hike else (base / ".staging")
 
 
-@router.post("/api/projects/{project_id}/parts/upload", include_in_schema=False)
-async def upload_parts(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def _dedupe_name(dest_dir: Path, name: str) -> Path:
+    """Same collision handling as the old whole-file endpoints — checked again at finish
+    time (not just at begin), since hours can pass between the two for a large upload."""
+    dest = dest_dir / name
+    if dest.exists():
+        dest = dest_dir / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
+    return dest
+
+
+# Chunked upload: `begin` (find/create a staging slot, report bytes already received),
+# `chunk` (append one piece at a known offset), `finish` (verify + move into place). See
+# core/chunked_upload.py docstring for why — this replaced a single-request whole-file
+# upload that a 30-minute Traefik entrypoint readTimeout would kill on any large file.
+@router.post("/api/projects/{project_id}/parts/upload/begin", include_in_schema=False)
+async def begin_part_upload(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
+    body = await request.json()
+    try:
+        filename, offset = chunked_upload.begin(_staging_dir(project_id), str(body.get("filename") or ""))
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"filename": filename, "offset": offset})
+
+
+@router.put("/api/projects/{project_id}/parts/upload/chunk", include_in_schema=False)
+async def chunk_part_upload(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
+    filename = request.query_params.get("filename", "")
+    try:
+        offset = int(request.query_params.get("offset", "-1"))
+    except ValueError:
+        return JSONResponse({"error": "invalid offset"}, status_code=400)
+    try:
+        new_size = await chunked_upload.append_chunk(_staging_dir(project_id), filename, offset, request.stream())
+    except chunked_upload.OffsetMismatch as exc:
+        return JSONResponse({"offset": exc.actual_offset}, status_code=409)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"offset": new_size})
+
+
+@router.post("/api/projects/{project_id}/parts/upload/finish", include_in_schema=False)
+async def finish_part_upload(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
-    form = await request.form()
-    files = [f for f in form.getlist("files") if hasattr(f, "filename") and f.filename]
-    if not files:
-        return Response("No files selected.", status_code=400)
+    body = await request.json()
+    filename = str(body.get("filename") or "")
+    try:
+        total_size = int(body.get("total_size", -1))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "invalid total_size"}, status_code=400)
+    try:
+        staged = chunked_upload.finish(_staging_dir(project_id), filename, total_size)
+    except chunked_upload.OffsetMismatch as exc:
+        return JSONResponse({"offset": exc.actual_offset}, status_code=409)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
     dest_dir = get_config().uploads_dir_path / str(project_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    saved: list[str] = []
-    for f in files:
-        name = Path(f.filename).name  # strip any directory components from the client
-        dest = dest_dir / name
-        if dest.exists():
-            dest = dest_dir / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
-        with dest.open("wb") as out:
-            while chunk := await f.read(_UPLOAD_CHUNK):
-                out.write(chunk)
-        saved.append(str(dest))
-    projects.add_parts(db, project, saved)
-    return _redirect(project_id)
+    dest = _dedupe_name(dest_dir, staged.name)
+    staged.rename(dest)
+    projects.add_parts(db, project, [str(dest)])
+    return JSONResponse({"file": str(dest)})
 
 
 @router.post("/api/projects/{project_id}/parts/{part_id}/move", include_in_schema=False)
@@ -247,32 +292,63 @@ def delete_part(project_id: int, part_id: int, db: Session = Depends(get_db), us
     return _redirect(project_id)
 
 
-@router.post("/api/projects/{project_id}/hike/upload", include_in_schema=False)
-async def upload_hike(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+@router.post("/api/projects/{project_id}/hike/upload/begin", include_in_schema=False)
+async def begin_hike_upload(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
+    body = await request.json()
+    try:
+        filename, offset = chunked_upload.begin(_staging_dir(project_id, hike=True), str(body.get("filename") or ""))
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"filename": filename, "offset": offset})
+
+
+@router.put("/api/projects/{project_id}/hike/upload/chunk", include_in_schema=False)
+async def chunk_hike_upload(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
+    filename = request.query_params.get("filename", "")
+    try:
+        offset = int(request.query_params.get("offset", "-1"))
+    except ValueError:
+        return JSONResponse({"error": "invalid offset"}, status_code=400)
+    try:
+        new_size = await chunked_upload.append_chunk(_staging_dir(project_id, hike=True), filename, offset, request.stream())
+    except chunked_upload.OffsetMismatch as exc:
+        return JSONResponse({"offset": exc.actual_offset}, status_code=409)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"offset": new_size})
+
+
+@router.post("/api/projects/{project_id}/hike/upload/finish", include_in_schema=False)
+async def finish_hike_upload(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
     project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
-    form = await request.form()
-    files = [f for f in form.getlist("sources") if hasattr(f, "filename") and f.filename]
+    body = await request.json()
+    filename = str(body.get("filename") or "")
     try:
-        speed = float(form.get("speed_factor", "1.0") or "1.0")
-    except ValueError:
+        total_size = int(body.get("total_size", -1))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "invalid total_size"}, status_code=400)
+    try:
+        speed = float(body.get("speed_factor", 1.0) or 1.0)
+    except (TypeError, ValueError):
         speed = 1.0
-    saved: list[str] = []
-    if files:
-        dest_dir = get_config().uploads_dir_path / str(project_id) / "hike"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            name = Path(f.filename).name
-            dest = dest_dir / name
-            if dest.exists():
-                dest = dest_dir / f"{dest.stem}_{uuid.uuid4().hex[:8]}{dest.suffix}"
-            with dest.open("wb") as out:
-                while chunk := await f.read(_UPLOAD_CHUNK):
-                    out.write(chunk)
-            saved.append(str(dest))
-    projects.add_hike_sources(db, project, saved, speed)
-    return _redirect(project_id)
+    try:
+        staged = chunked_upload.finish(_staging_dir(project_id, hike=True), filename, total_size)
+    except chunked_upload.OffsetMismatch as exc:
+        return JSONResponse({"offset": exc.actual_offset}, status_code=409)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    dest_dir = get_config().uploads_dir_path / str(project_id) / "hike"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = _dedupe_name(dest_dir, staged.name)
+    staged.rename(dest)
+    projects.add_hike_sources(db, project, [str(dest)], speed)
+    return JSONResponse({"file": str(dest)})
 
 
 @router.post("/api/projects/{project_id}/hike/remove", include_in_schema=False)

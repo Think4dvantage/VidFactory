@@ -118,11 +118,22 @@ a shared household resource, not per-user. **M7:** `videos` is no longer a brows
 **projects** — `POST /projects/new` (create+redirect; optional `date` form field, defaults to today) ·
 `GET /projects/{id}` page · `GET /projects/{id}/editor` page ·
 flight-type/`flightlog-id`/parts(upload,move,delete)/hike(`upload`,`remove`) mutations ·
-`POST /api/projects/{id}/parts/upload` (multipart, one or more files; streamed in 8 MB chunks to
-`VF_UPLOADS_DIR/{project_id}/`, then added as `SourcePart`s — the **only** way to get source
-footage in, see Storage & mounts) · `POST /api/projects/{id}/hike/upload` (multipart, same chunked
-upload to `VF_UPLOADS_DIR/{project_id}/hike/`, appends to `Hike.sources` + sets `speed_factor`) ·
-`POST /api/projects/{id}/hike/remove` (form `index`, removes one `Hike.sources` entry by position) ·
+**source upload (M11, `core/chunked_upload.py`)** — no longer a single multipart request (a 30-min
+Traefik entrypoint `readTimeout` kills any request that takes longer, which any real flight video
+does on home upload bandwidth); the client instead splits the file into 8 MiB chunks and calls three
+JSON/raw-body endpoints per file: `POST /api/projects/{id}/parts/upload/begin`
+(`{filename, total_size}` → `{filename, offset}`, `offset` > 0 means resuming a prior attempt) ·
+`PUT /api/projects/{id}/parts/upload/chunk?filename=&offset=` (raw chunk bytes; 409 +
+`{"offset": actual}` if the staging file isn't at the expected offset — client resyncs and
+continues) · `POST /api/projects/{id}/parts/upload/finish` (`{filename, total_size}` → moves
+`VF_UPLOADS_DIR/{project_id}/.staging/{filename}` into place, registers the `SourcePart`). Progress
+is entirely server-side-file-size-driven (no session state), so a laptop sleep, network drop, or
+even a container restart mid-upload only costs the bytes since the last chunk — re-calling `begin`
+picks up from the real on-disk offset. `POST /api/projects/{id}/hike/upload/{begin,chunk,finish}` is
+the identical shape at `VF_UPLOADS_DIR/{project_id}/hike/.staging/`, with `finish` additionally
+taking `speed_factor` and calling `add_hike_sources`. This is the **only** way to get source footage
+in, see Storage & mounts. `POST /api/projects/{id}/hike/remove` (form `index`, removes one
+`Hike.sources` entry by position) ·
 `GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if
 present) · highlight CRUD `GET/POST /api/projects/{id}/highlights[/{hid}[/delete]]` (JSON) ·
 `GET /api/projects/{id}/flightlog-hints` (M8, `core/flightlog_hints.py`) — segment-derived timeline
@@ -203,7 +214,7 @@ compose+env only. `.env.example` documents the two host-path vars (compose auto-
 
 **This repo does not deploy itself.** It produces three things for whatever project/host actually
 runs the container: the image (built + pushed to GHCR by `.github/workflows/docker-publish.yml` on
-every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, currently `v0.4.2`), and
+every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, currently `v0.4.3`), and
 two example config files to copy over — `docker-compose.standalone.yml` and `.env.example`
 (alongside the existing `config.yml.example`). The actual deploy target — the shared docker host at
 SSH alias `sdh` (55 TB pooled storage, GPU = dedicated Intel card, QSV via `/dev/dri`; NVIDIA CDI
@@ -216,7 +227,7 @@ real `sdh` compose file adds its own Traefik labels on top, see below). See "Sta
 
 **Repo/CI state:** on GitHub at `Think4dvantage/VidFactory`, branch `main` (pushed — not the old
 local-only `m0-foundation` branch `features.md`'s deploy blockquote used to describe). Tags
-`v0.2.0`–`v0.4.2` so far, each auto-publishing the image on push.
+`v0.2.0`–`v0.4.3` so far, each auto-publishing the image on push.
 
 **Host migration has happened (found 2026-08-19, not yet reflected anywhere else in these docs
 before now).** `xpsex`/`lg4.ch` are dead and irrelevant — the app is live on a **different** shared
@@ -252,9 +263,9 @@ before, just a new host). Confirmed via `docker inspect`/`docker logs`/`curl :80
   on `sdh` until it's redeployed to `v0.4.1`+), builds, and a real Flightlog API call. Only
   `/health` + container/mount state were checked so far.
 
-Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.2`; `sdh` was running `0.4.1` (the
-M9 upload fix, not yet the M10 GPU fix) as of the last check above. See `features.md` "Host
-migration" roadmap item.
+Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.3`; `sdh` was running `0.4.1` (the
+M9 upload fix, not yet the M10 GPU fix or M11 chunked upload) as of the last check above. See
+`features.md` "Host migration" roadmap item.
 
 ### Healthcheck
 `python:3.11-slim` has no `curl`; use Python stdlib:

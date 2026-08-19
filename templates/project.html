@@ -190,10 +190,65 @@
 {% endif %}
 
 <script>
-// Generic uploader for the source-parts / hike forms: real byte-level progress + visible
-// errors via XHR (fetch can't report upload progress). Previously these were plain htmx
-// forms with hx-swap="none", so a slow multi-GB transfer or a failed request looked
-// identical to "nothing happened" — no progress bar, no error text, nothing.
+// Chunked, resumable upload for the source-parts / hike forms — works around Traefik's
+// 30-minute entrypoint readTimeout (any single request running longer gets killed) by
+// never sending a whole multi-GB file in one request. As a side effect, progress lives on
+// disk server-side (the staging file's size), so recovering from a network drop or a
+// laptop sleep just means clicking Upload again with the same file selected — it resumes
+// instead of restarting from zero. See core/chunked_upload.py for the server side.
+const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — completes in seconds even at slow home-upload speeds
+
+async function uploadOneFile(baseUrl, file, extraFinishFields, onBytes) {
+  const beginResp = await fetch(`${baseUrl}/begin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: file.name, total_size: file.size }),
+  });
+  if (!beginResp.ok) throw new Error(`begin failed (${beginResp.status}): ${await beginResp.text()}`);
+  const begun = await beginResp.json();
+  const filename = begun.filename;
+  let offset = begun.offset;
+  onBytes(offset);
+
+  while (offset < file.size) {
+    const chunk = file.slice(offset, Math.min(offset + CHUNK_SIZE, file.size));
+    let resp;
+    try {
+      resp = await fetch(`${baseUrl}/chunk?filename=${encodeURIComponent(filename)}&offset=${offset}`, {
+        method: 'PUT',
+        body: chunk,
+      });
+    } catch (err) {
+      // Network dropped mid-chunk — re-check how much actually landed and resync from there
+      // rather than assuming the chunk failed outright (it may have partially landed).
+      const resync = await fetch(`${baseUrl}/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, total_size: file.size }),
+      });
+      if (!resync.ok) throw err;
+      offset = (await resync.json()).offset;
+      onBytes(offset);
+      continue;
+    }
+    if (resp.status === 409) {
+      offset = (await resp.json()).offset;
+      onBytes(offset);
+      continue;
+    }
+    if (!resp.ok) throw new Error(`chunk upload failed (${resp.status}): ${await resp.text()}`);
+    offset = (await resp.json()).offset;
+    onBytes(offset);
+  }
+
+  const finishResp = await fetch(`${baseUrl}/finish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, total_size: file.size, ...extraFinishFields }),
+  });
+  if (!finishResp.ok) throw new Error(`finish failed (${finishResp.status}): ${await finishResp.text()}`);
+}
+
 document.querySelectorAll('form[data-upload]').forEach((form) => {
   const fileInput = form.querySelector(`input[name="${form.dataset.field}"]`);
   const progress = form.querySelector('.upload-progress');
@@ -202,10 +257,12 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
   const bar = form.querySelector('.upload-bar');
   const result = form.querySelector('.upload-result');
   const submitBtn = form.querySelector('button');
+  const speedInput = form.querySelector('[name="speed_factor"]');
 
-  form.addEventListener('submit', (ev) => {
+  form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    if (!fileInput.files.length) {
+    const files = Array.from(fileInput.files);
+    if (!files.length) {
       result.textContent = 'Choose one or more files first.';
       return;
     }
@@ -216,34 +273,30 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
     bar.value = 0;
     submitBtn.disabled = true;
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', form.dataset.upload);
-    xhr.upload.addEventListener('progress', (e) => {
-      if (!e.lengthComputable) return;
-      const p = Math.round((e.loaded / e.total) * 100);
-      pct.textContent = p;
-      bar.value = p;
-    });
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        status.textContent = 'Saved';
-        pct.textContent = '100';
-        bar.value = 100;
-        window.location.reload();
-        return;
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    const extraFinishFields = speedInput ? { speed_factor: speedInput.value } : {};
+    let doneBefore = 0;
+
+    try {
+      for (const file of files) {
+        const base = doneBefore;
+        await uploadOneFile(form.dataset.upload, file, extraFinishFields, (bytes) => {
+          const p = Math.min(100, Math.round(((base + bytes) / totalSize) * 100));
+          pct.textContent = p;
+          bar.value = p;
+        });
+        doneBefore += file.size;
       }
+      status.textContent = 'Saved';
+      pct.textContent = '100';
+      bar.value = 100;
+      window.location.reload();
+    } catch (err) {
       submitBtn.disabled = false;
       progress.hidden = true;
-      result.textContent = `❌ Upload failed (${xhr.status}): ${xhr.responseText || 'unknown error'}`;
-      console.error('[VF:upload] failed', xhr.status, xhr.responseText);
-    });
-    xhr.addEventListener('error', () => {
-      submitBtn.disabled = false;
-      progress.hidden = true;
-      result.textContent = '❌ Upload failed: network error';
-      console.error('[VF:upload] network error');
-    });
-    xhr.send(new FormData(form));
+      result.textContent = `❌ Upload failed: ${err.message} (click Upload again to resume)`;
+      console.error('[VF:upload] failed', err);
+    }
   });
 });
 
