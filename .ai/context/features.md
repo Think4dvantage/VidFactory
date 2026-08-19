@@ -1,19 +1,31 @@
 # Feature History & Backlog
 
-## Current Version: pre-v0.1 (M0–M8 shipped; M0–M4 verified live at vf-dev.lg4.ch, M5a–M8 local-only — no deploy host yet)
+## Current Version: pre-v0.1 (M0–M9 shipped in repo; M0–M4 verified live at the old vf-dev.lg4.ch, M5a–M9 local-only so far — see Host migration below)
 
-> Deployed via `scripts/VF-dev.ps1 deploy` (SSH alias `xpsex` → `/opt/VidFactory`). Each milestone
-> was verified live on the host. Git branch `m0-foundation` (not pushed to a remote).
-> The editor streams a 720p proxy (`preview_file`) for smooth scrubbing.
+> **M0–M4** were deployed via `scripts/VF-dev.ps1 deploy` (SSH alias `xpsex` → `/opt/VidFactory`)
+> and verified live on that host, on git branch `m0-foundation` (local-only at the time).
+> **As of M5b/2026-08-18** the repo is on GitHub at `Think4dvantage/VidFactory`, branch `main`
+> (pushed), tagged `v0.2.0`–`v0.4.1` so far — each tag push auto-publishes the image to GHCR via
+> `.github/workflows/docker-publish.yml`. M5a onward was verified locally only (pytest + manual
+> `TestClient` runs) through M8.
+> **2026-08-19: the host migration has actually happened** — found live during the M9 investigation
+> below, not caught by the previous doc pass earlier the same day. `xpsex` is dead; the app now runs
+> on a different shared docker host (SSH alias `sdh`, domain `vf.lenti.cloud`, not `vf.lg4.ch`),
+> deployed from a compose project outside this repo. Base health (`/health`, mounts, sqlite) is
+> confirmed **ok** there, running the current `main` HEAD. Full feature verification on that host
+> (login, uploads, builds, a real Flightlog call) has **not** happened yet — see "Host migration"
+> below and `architecture.md`'s Deployment section for the details found so far (incl. GPU/QSV not
+> actually engaging — encoder reports `libx264`). The editor streams a 720p proxy (`preview_file`)
+> for smooth scrubbing.
 >
 > **Pivot (post-M4):** flight-log/IGC analytics (M1, M1+…M1++++ below) has been **removed from
-> VidFactory** and is becoming a separate "Flightlog" project/service with its own API. VidFactory
-> is now purely the video-production tool; `Project` is standalone (no more `Outing` dependency).
-> The M1* rows below are kept as history of what shipped and when — that code and its live data
-> (598 outings, 281 igc_tracks rows) are **not deleted from the DB**, just no longer referenced by
-> this app. See M1a below for the detach. The home NAS is also temporarily unavailable (house move),
-> hence M1a's upload path. `xpsex` (the old deploy host) is no longer available; deployment target
-> is TBD on a new host and the `Host setup (Fedora xpsex)` section below is stale until replaced.
+> VidFactory** and is becoming a separate "Flightlog" project/service with its own API — which now
+> exists and is integrated (see M6). VidFactory is purely the video-production tool; `Project` is
+> standalone (no more `Outing` dependency). The M1* rows below are kept as history of what shipped
+> and when — that code and its live data (598 outings, 281 igc_tracks rows) are **not deleted from
+> the DB**, just no longer referenced by this app. See M1a below for the detach. The home NAS is
+> also unavailable for the next year (house move + confirmed timeline, M7's trigger), hence M1a's
+> upload path and M7's removal of NAS video browsing entirely.
 
 ### Shipped Milestones
 
@@ -39,13 +51,14 @@
 | M6 | **Flightlog API integration:** Flightlog now exposes a live, frozen `/api/integration/v1` contract; `core/flightlog_client.py` is a real `httpx`-based client (moved `httpx` to runtime deps) instead of the M1a stub. `models/flightlog.py` mirrors the contract verbatim (`FlightMetadataOut`, `SegmentOut`, `FlightLink`, `IgcSummary`). Migration `0008` retypes `external_flight_id` to `TEXT` (the contract's flight id is a string; the old `Integer` column would have silently mishandled it — no data was ever at risk, the field was always `NULL` until now). Each user supplies their own Flightlog API key on `/account` (per-pilot bearer credential, plaintext at rest since it must be resent verbatim, never returned in any response). `youtube-metadata` gained best-effort `flight`/`flight_segments` keys (silently `null` if not configured or the call errors — never breaks the endpoint). New `POST /api/projects/{id}/flightlog-id` (set the flight id on a project) and `POST /api/projects/{id}/flightlog-link` (push a finished-video URL back to Flightlog — called by the external YTChannelMgmt MCP once it actually publishes, since VidFactory's own outputs are local files with no public URL to push automatically). **Verified locally via `httpx.MockTransport`** against the documented contract shapes (`tests/backend/test_flightlog_client.py`); a live call against the real `fl-dev.sdh.lol:8002` dev key could not be verified from this dev environment (outbound network egress is blocked here) — verify from a host that can reach it before relying on it in production. |
 | M7 | **Removed the `videos` NAS mount entirely** (`config.MountsSection`/`mount_roots()`/`_ENV_MOUNT_KEYS` no longer have a `videos`/`VF_VIDEOS` entry) — the NAS it pointed at (`InstaOut`) is confirmed unreachable for the next year, so the "browse NAS, add selected parts" UI/endpoint (`POST /api/projects/{id}/parts/add`) and the NAS-based Hike & Fly source picker are both gone; local upload (`POST /api/projects/{id}/parts/upload`, from M1a) is now the sole way to add any source footage. Hike & Fly footage gets its own upload path: `POST /api/projects/{id}/hike/upload` (multipart, appends to `Hike.sources` + sets `speed_factor`) and `POST /api/projects/{id}/hike/remove` (drops one entry by index) replace the old NAS-checkbox `set_hike` endpoint. The `browser`/`filebrowser` mechanism itself is untouched — it still serves `music`, which was already local-only in the standalone deploy (M1b) and never depended on the NAS. **Verified locally** (pytest + a manual TestClient run: project page has no NAS references, `/api/browse/videos` 400s, hike upload/remove round-trips, `/browse/music` still works). |
 | M8 | **Flightlog timeline hints in the highlight editor:** `core/flightlog_hints.py` translates Flightlog IGC segments (`GET .../segments`) into video-timeline positions using the pilot's own `launch` highlight as the anchor (`video_offset_s = launch.start + segment.start_offset_s` — Flightlog has no idea when the camera started rolling, only "seconds since takeoff"). New `GET /api/projects/{id}/flightlog-hints` — always 200, `{"status": "no_launch_marked"\|"unavailable"\|"ok", "hints": [...]}`, best-effort exactly like the M6 `youtube-metadata` enrichment (Flightlog outage/no key/no launch marked never breaks the editor page). `static/editor.js` overlays small colored markers on the timeline canvas keyed by `hint.kind` with a generic fallback style for any kind not in the lookup table — deliberately future-proof, since Flightlog may add more segment kinds later and none of this code should need to change when it does. Hover a marker for a tooltip (kind, altitude change, climb rate); clicking within a few pixels of one snaps the seek to it exactly. Refetched every time the highlight list reloads, so hints appear live the moment a launch highlight is saved. **Verified locally** (pytest incl. offset-math assertions in `tests/backend/test_flightlog_hints.py`, plus a manual TestClient run through create-project → editor page → mark launch → hints endpoint). |
+| M9 | **Fixed source-video upload 500s + dependency-floor audit:** every part/hike upload was failing server-side with `multipart.exceptions.MultipartParseError: Did not find CR at end of boundary` — a `python-multipart` 0.0.9 boundary-parser bug that only surfaces on large multipart bodies, not the tiny `TestClient` uploads M1a's local verification used, so it shipped unnoticed. Root cause: `pyproject.toml` pinned it `^0.0.9`, and Poetry's caret on a `0.0.x` version locks to that exact patch — with no `poetry.lock` committed (deliberate, so every image build re-resolves to latest), every rebuild kept re-landing on the same broken `0.0.9`. Fixed the constraint (`>=0.0.32,<1.0`, the actual latest available today) and audited every other dependency for the same caret-on-`0.x` trap (`fastapi`, `uvicorn`, `httpx` were minor-locked the same way; `pillow`/`sse-starlette`/`pytest` were major-capped below latest) — see `01-project-overview.md` "Dependency versioning". Also removed `aiofiles` (declared, never imported anywhere) and bumped the `htmx` CDN pin (`2.0.3`→`2.0.10`). Separately, the upload `<form>`s had zero progress/error UI (`hx-swap="none"`, no listener) — indistinguishable from "broken" even once uploads succeed, since a multi-GB file over a home connection can take a long time with no feedback at all; replaced both forms with `XMLHttpRequest`-based uploads showing live byte progress and surfacing any HTTP error inline (`templates/project.html`). **Verified only that the root-cause bug is real** — reproduced the exact `MultipartParseError` in `sdh`'s live container logs (see Host migration below) and confirmed `/mnt/media/vidfactory/uploads` was empty, consistent with every attempt 500ing before a byte was written. The dependency/version fix itself has **not** been deployed or live-verified yet — no live hotfix was applied on `sdh` (`04-constraints.md`: never touch prod directly); it ships on the next normal tag/release. |
 
 ### Roadmap (ordered, not yet shipped)
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
 | M5 remainder | Exact Summary-video chapter timestamps (needs the build-time `target_seconds` persisted so `auto_fill` filler placement is known — currently only content-order is derivable, see M5a) | chapter timestamps match the real rendered Summary.mp4 |
-| Host migration | Move deployment off the retired `xpsex` host onto the new (already-provisioned, 55 TB) host; revisit GPU/Traefik/compose specifics once host details are known; live-verify M5b/M6 there | app deployed + verified live on the new host, `.ai/context/` deploy docs updated |
+| Host migration (in progress) | **App is deployed and healthy on the new host** (`sdh`, `vf.lenti.cloud`, 55 TB pooled storage — see `architecture.md` Deployment) as of 2026-08-19. Still open: live-verify login/uploads/builds/a real Flightlog call (nothing beyond `/health` has been checked), and fix GPU encode — `/dev/dri` is passed through but `/health` reports `libx264`, QSV isn't actually engaging | login/upload/build/Flightlog-call all verified live on `sdh`; encoder reports a hardware codec, not `libx264`; `.ai/context/` deploy docs fully current (partially done now) |
 
 ---
 

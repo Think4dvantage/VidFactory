@@ -55,7 +55,8 @@ server-side, so reconnecting after a refresh (or from another device) resumes th
 ## Styling
 
 Use Tailwind utility classes directly in templates. A simple dark palette is fine but not mandated;
-keep it consistent via `base.html`. No separate design-token system is required for a single-user tool.
+keep it consistent via `base.html`. No separate design-token system is required — this is a small,
+two-user tool (see `features.md` M5b), not a multi-tenant product with per-user theming needs.
 
 ---
 

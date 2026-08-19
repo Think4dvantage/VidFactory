@@ -67,10 +67,15 @@
   <p class="text-slate-400 text-sm mb-3">No parts yet. Upload footage below.</p>
   {% endif %}
 
-  <form hx-post="/api/projects/{{ project.id }}/parts/upload" hx-encoding="multipart/form-data" hx-swap="none">
+  <form id="parts-upload-form" data-upload="/api/projects/{{ project.id }}/parts/upload" data-field="files">
     <input type="file" name="files" multiple accept="video/*"
            class="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-slate-200 hover:file:bg-slate-600">
     <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Upload</button>
+    <div class="upload-progress mt-2 text-sm" hidden>
+      <div class="text-slate-300"><span class="upload-status">Uploading…</span> <span class="upload-pct">0</span>%</div>
+      <progress class="upload-bar w-full" max="100" value="0"></progress>
+    </div>
+    <div class="upload-result mt-2 text-sm text-slate-300"></div>
   </form>
 </section>
 
@@ -94,13 +99,18 @@
   {% else %}
   <p class="text-slate-400 text-sm mb-3">No hike footage uploaded yet.</p>
   {% endif %}
-  <form hx-post="/api/projects/{{ project.id }}/hike/upload" hx-encoding="multipart/form-data" hx-swap="none">
+  <form id="hike-upload-form" data-upload="/api/projects/{{ project.id }}/hike/upload" data-field="sources">
     <input type="file" name="sources" multiple accept="video/*"
            class="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-slate-200 hover:file:bg-slate-600">
     <label class="flex items-center gap-2 text-sm mt-2">Speed factor
       <input type="number" step="0.1" min="1" name="speed_factor" value="{{ hike.speed_factor if hike else 1.0 }}"
              class="w-24 rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
     <button class="mt-2 rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Upload &amp; save</button>
+    <div class="upload-progress mt-2 text-sm" hidden>
+      <div class="text-slate-300"><span class="upload-status">Uploading…</span> <span class="upload-pct">0</span>%</div>
+      <progress class="upload-bar w-full" max="100" value="0"></progress>
+    </div>
+    <div class="upload-result mt-2 text-sm text-slate-300"></div>
   </form>
 </section>
 {% endif %}
@@ -180,6 +190,63 @@
 {% endif %}
 
 <script>
+// Generic uploader for the source-parts / hike forms: real byte-level progress + visible
+// errors via XHR (fetch can't report upload progress). Previously these were plain htmx
+// forms with hx-swap="none", so a slow multi-GB transfer or a failed request looked
+// identical to "nothing happened" — no progress bar, no error text, nothing.
+document.querySelectorAll('form[data-upload]').forEach((form) => {
+  const fileInput = form.querySelector(`input[name="${form.dataset.field}"]`);
+  const progress = form.querySelector('.upload-progress');
+  const status = form.querySelector('.upload-status');
+  const pct = form.querySelector('.upload-pct');
+  const bar = form.querySelector('.upload-bar');
+  const result = form.querySelector('.upload-result');
+  const submitBtn = form.querySelector('button');
+
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (!fileInput.files.length) {
+      result.textContent = 'Choose one or more files first.';
+      return;
+    }
+    result.textContent = '';
+    progress.hidden = false;
+    status.textContent = 'Uploading…';
+    pct.textContent = '0';
+    bar.value = 0;
+    submitBtn.disabled = true;
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', form.dataset.upload);
+    xhr.upload.addEventListener('progress', (e) => {
+      if (!e.lengthComputable) return;
+      const p = Math.round((e.loaded / e.total) * 100);
+      pct.textContent = p;
+      bar.value = p;
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        status.textContent = 'Saved';
+        pct.textContent = '100';
+        bar.value = 100;
+        window.location.reload();
+        return;
+      }
+      submitBtn.disabled = false;
+      progress.hidden = true;
+      result.textContent = `❌ Upload failed (${xhr.status}): ${xhr.responseText || 'unknown error'}`;
+      console.error('[VF:upload] failed', xhr.status, xhr.responseText);
+    });
+    xhr.addEventListener('error', () => {
+      submitBtn.disabled = false;
+      progress.hidden = true;
+      result.textContent = '❌ Upload failed: network error';
+      console.error('[VF:upload] network error');
+    });
+    xhr.send(new FormData(form));
+  });
+});
+
 // Generic build runner for the summary / full-music buttons (form -> job -> SSE).
 document.querySelectorAll('[data-build]').forEach((btn) => {
   btn.addEventListener('click', async () => {

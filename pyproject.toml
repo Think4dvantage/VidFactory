@@ -1,27 +1,26 @@
 [tool.poetry]
 name = "vidfactory"
-version = "0.4.0"
+version = "0.4.1"
 description = "Paragliding video pipeline (concat → summary → shorts → YouTube metadata)"
 authors = ["Raphael Eymann <r+claude@eymanns.ch>"]
 packages = [{include = "vidfactory", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-fastapi = "^0.115"
-uvicorn = {extras = ["standard"], version = "^0.30"}
+fastapi = ">=0.115,<1.0"
+uvicorn = {extras = ["standard"], version = ">=0.30,<1.0"}
 pydantic = "^2.9"
 sqlalchemy = "^2.0"
 pyyaml = "^6.0"
 jinja2 = "^3.1"
-python-multipart = "^0.0.9"
-aiofiles = "^24.0"
-pillow = "^10.4"
-sse-starlette = "^2.1"
-httpx = "^0.27"
+python-multipart = ">=0.0.32,<1.0"
+pillow = ">=10.4,<13.0"
+sse-starlette = ">=2.1,<4.0"
+httpx = ">=0.27,<1.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-pytest-asyncio = "^0.24"
+pytest = ">=8.0,<10.0"
+pytest-asyncio = ">=0.24,<2.0"
 
 [build-system]
 requires = ["poetry-core"]

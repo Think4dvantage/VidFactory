@@ -32,7 +32,7 @@ named-short sources. `launch` and `landing` are just Highlights with a `role` an
 | `users` | `id`, `username`(unique), `password_hash`(`scrypt$salt$digest`), `flightlog_api_key`(nullable, plaintext bearer credential), `created_at` | No roles/signup UI — bootstrap user from `VF_BOOTSTRAP_USERNAME`/`_PASSWORD` at first boot, additional users via `scripts/create_user.py` |
 | `sessions` | `token`(PK, opaque), `user_id→users`, `created_at`, `expires_at` | ~30-day cookie session (`vf_session`, httponly); logout deletes the row |
 | `projects` | `id`, `owner_id→users`(nullable), `date` (nullable), `external_flight_id` (nullable `TEXT`, Flightlog's flight id — no FK, separate service), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | **top-level**; standalone (migration 0006 added `date`/`external_flight_id`, replacing the old `outing_id` FK; 0007 added `owner_id`; 0008 retyped `external_flight_id` to `TEXT` — see Core concept above). Created via `POST /projects/new`. A project not owned by the requesting user 404s (never 403) |
-| `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw source video parts (NAS-browsed **or uploaded**, see Storage & mounts), user-orderable |
+| `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw source video parts (uploaded — see Storage & mounts, M7), user-orderable |
 | `hikes` | `id`, `project_id→projects`, `sources`(json list), `speed_factor`(default 32.0) | H&F only; sped up and prepended to the full flight |
 | `highlights` | `id`, `project_id→projects`, `name`, `start`, `end`, `comment`, `type`('video'\|'picture'), `role`('normal'\|'launch'\|'landing'), `image_path`(nullable), `duration`(nullable, picture), `use_in_summary`(bool), `make_short`(bool) | **the spine**; times on the full-flight timeline. At most one `launch` and one `landing`, both optional |
 | `pools` | `id`, `project_id→projects`, `kind`('flying'\|'hiking'), `start`, `end` | ranges **on the full flight** for random short sampling (legacy mode) |
@@ -79,12 +79,11 @@ a tooltip (kind/alt-change/climb-rate), click near one to seek exactly to it.
      **under 30 s**; short title = highlight name. (`launch`/`landing` skipped if not marked.)
    - **Random-pool (legacy):** `launch? → flying → landing? → CTA`; random sampling with chronological
      re-sort and a `UsedMap` (per-file consumed ranges) so a batch never reuses footage.
-4. **YouTube artifacts** (`youtube_meta.py`, not yet built) — `metadata.json` (+ readable `.txt`):
-   chapters from highlights (`MM:SS Name`, first `00:00`, enforce YouTube ≥3 chapters / ≥10 s);
-   summary + per-short titles/descriptions (site/glider, once available via
-   `core/flightlog_client.py` — the Flightlog API doesn't exist yet, so this may ship without it
-   and backfill later); suggested release dates (2–3 Shorts/wk); aggregated music credits. Consumed
-   downstream by the YTChannelMgmt MCP.
+4. **YouTube metadata** (`core/youtube_meta.py`, M5a — shipped as a live read API, not a written
+   `metadata.json`, see `## API Contracts` → **youtube** below): highlights, summary content order,
+   shorts, and — since M6 — Flightlog flight/segment data when the project has one linked, for a
+   separately-run YouTube-management container to derive chapters/titles/descriptions/release plan
+   from on its own pull schedule.
 
 **Music** (`music.py`) — folder mode (shuffle to cover duration; durations cached by folder-path hash)
 or single-file mode (loop). `loudnorm` (EBU R128) then `amix` (`duration=first`, `normalize=0`) at a
@@ -92,7 +91,7 @@ user music/original ratio. Writes a credits `.txt` listing every track used.
 
 ---
 
-## API Contracts (implemented through M6)
+## API Contracts (implemented through M8)
 
 Pages return HTML (`include_in_schema=False`); mutations mostly reply `204 + HX-Redirect`; FFmpeg
 builds return `{job_id}` and stream progress over SSE. Every route except `GET /health` and
@@ -204,43 +203,52 @@ compose+env only. `.env.example` documents the two host-path vars (compose auto-
 
 **This repo does not deploy itself.** It produces three things for whatever project/host actually
 runs the container: the image (built + pushed to GHCR by `.github/workflows/docker-publish.yml` on
-every `v*` tag — currently `ghcr.io/think4dvantage/vidfactory:latest`/`:0.2.0`), and two example
-config files to copy over — `docker-compose.standalone.yml` and `.env.example` (alongside the
-existing `config.yml.example`). The actual deploy target — a reachable Linux docker host, not
-`xpsex`, not the eventual 55 TB host, GPU = dedicated Intel card (QSV via `/dev/dri`; NVIDIA CDI
+every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, currently `v0.4.1`), and
+two example config files to copy over — `docker-compose.standalone.yml` and `.env.example`
+(alongside the existing `config.yml.example`). The actual deploy target — the shared docker host at
+SSH alias `sdh` (55 TB pooled storage, GPU = dedicated Intel card, QSV via `/dev/dri`; NVIDIA CDI
 device present in the example but commented out, no NVIDIA Container Toolkit there) — is managed
-from another project. No Traefik/`proxy` network in the example — it publishes `8000:8000` directly.
-See "Standalone deploy (M1b)" above for the mount rationale. `VF-dev.ps1` is unrelated to this path
-(still hardwired to `xpsex`, which is dead — see below).
+from another project (the user's separate Docker-host repo, not this one), see the host-migration
+findings below. No Traefik/`proxy` network in the example — it publishes `8000:8000` directly (the
+real `sdh` compose file adds its own Traefik labels on top, see below). See "Standalone deploy
+(M1b)" above for the mount rationale. `VF-dev.ps1` is unrelated to this path (still hardwired to
+`xpsex`, which is dead — see below).
 
-> **Stale — host retired.** Everything below (GPU/CDI specifics, Traefik labels, `xpsex` SSH deploy)
-> described the old Fedora XPS host, which is no longer reachable after a move. Deploy target is a
-> new host (55 TB storage) not yet detailed here; see `features.md` "Host migration" roadmap item.
-> Kept as reference until that migration happens and this section gets rewritten for the new host.
+**Repo/CI state:** on GitHub at `Think4dvantage/VidFactory`, branch `main` (pushed — not the old
+local-only `m0-foundation` branch `features.md`'s deploy blockquote used to describe). Tags
+`v0.2.0`–`v0.4.1` so far, each auto-publishing the image on push.
 
-Mirrors `C:\git\LSMFAPI`; registered in the `C:\git\lg4.ch` management repo. Domains: **`vf-dev.lg4.ch`**
-(dev) and **`vf.lg4.ch`** (prod). Image: `ghcr.io/think4dvantage/vidfactory:vX`.
+**Host migration has happened (found 2026-08-19, not yet reflected anywhere else in these docs
+before now).** `xpsex`/`lg4.ch` are dead and irrelevant — the app is live on a **different** shared
+docker host, SSH alias `sdh`, compose project at `/opt/sdh.lol/compose/public/vidfactory/compose.yml`
+(project name `vidfactory`, not managed from this repo — same "another project owns deploy" model as
+before, just a new host). Confirmed via `docker inspect`/`docker logs`/`curl :8000/health` on `sdh`:
 
-### GPU
-Host (old XPS laptop) has both an NVIDIA RTX 3070 Mobile (4 GB) and Intel graphics. The prod compose
-requests **both** paths so the detector can pick the best: NVIDIA via
-`deploy.resources.reservations.devices` (`driver: nvidia`, `capabilities: [gpu]`) and Intel via
-`/dev/dri` + render `group_add`. Ansible (`run_ansible: true`) installs the NVIDIA Container Toolkit
-and the CIFS `pg` mount.
+- **Domain**: `vf.lenti.cloud` (**not** `vf.lg4.ch`) — Traefik labels in **map** format here (this
+  homelab differs from the old lg4.ch one), HTTP router redirects to HTTPS
+  (`redirect-to-https@file` middleware) and the HTTPS router terminates via `letsencrypt`.
+- **Storage**: bind mounts, not the `vf_uploads`/named-volume pattern the repo's own compose
+  examples use — `/mnt/media/vidfactory/{uploads,music,library}` → `/app/{uploads,music,library}`,
+  on a pooled/cache array (`cache:disk1:disk2:disk3:disk4`, 54 T total / 41 T free at last check).
+  This is the "new (55 TB) host" the roadmap referred to.
+- **GPU**: `/dev/dri` is passed through (Intel QSV), but `/health` reports `"encoder":"libx264"` —
+  QSV is **not** actually being selected at runtime despite the device being present. Not
+  investigated further yet; `gpu_detector.py` or a missing render-group permission is the likely
+  culprit. Flag before assuming hardware encode is active on this host.
+- **Flightlog reachability**: `VF_FLIGHTLOG_URL=http://flightlog:8000` — a sibling container on the
+  same docker network, so the M6 Flightlog integration (previously never live-tested — outbound
+  egress from the dev sandbox that built it was blocked) **can now actually be verified live** from
+  this host, unlike the old dev-sandbox limitation.
+- Running image tag `ghcr.io/think4dvantage/vidfactory:0.4.0` at last check (2026-08-19), revision
+  label matched `main` HEAD (`55bf64d`) at that point — i.e. current as of then, but **predates the
+  M9 fix** (that shipped as `v0.4.1`); `sdh` has not been redeployed since. `/health` at last check:
+  `{"status":"ok", "sqlite":"ok", every mount "ok", "jobs_active":0}`.
+- **Not yet verified beyond base health**: login, uploads (the M9 `python-multipart` fix isn't live
+  on `sdh` until it's redeployed to `v0.4.1`+), builds, and a real Flightlog API call. Only
+  `/health` + container/mount state were checked so far.
 
-### Traefik Label Format
-Homelab requires **list format** labels (not map). Add `traefik.docker.network=proxy` when on multiple
-networks.
-
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.docker.network=proxy"
-  - "traefik.http.routers.vidfactory.rule=Host(`vf.lg4.ch`)"
-  - "traefik.http.routers.vidfactory.entrypoints=websecure"
-  - "traefik.http.routers.vidfactory.tls.certresolver=letsencrypt"
-  - "traefik.http.services.vidfactory.loadbalancer.server.port=8000"
-```
+Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.1`; `sdh` was still running `0.4.0`
+as of the last check above. See `features.md` "Host migration" roadmap item.
 
 ### Healthcheck
 `python:3.11-slim` has no `curl`; use Python stdlib:
@@ -250,7 +258,10 @@ healthcheck:
   test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
 ```
 
-### Dev overlay
+### Dev overlay — stale, describes the dead `xpsex`/lg4.ch host, not `sdh`
 `docker-compose.dev.yml` extends the base with live `src/`+`templates/`+`static/` mounts (`:ro,z`),
 the `proxy` network + Traefik labels for `vf-dev.lg4.ch`, and `PYTHONPYCACHEPREFIX=/tmp/pycache`.
 Dev deploy via `scripts/VF-dev.ps1` (tar → ssh `xpsex` → `/opt/VidFactory` → `docker compose … up --build -d`).
+Neither the compose overlay nor the script have been updated for `sdh` — there's currently no dev
+deploy path to the new host, only whatever manages the prod `compose.yml` at
+`/opt/sdh.lol/compose/public/vidfactory/` (outside this repo).

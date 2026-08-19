@@ -1,5 +1,14 @@
 # Project Overview — VidFactory
 
+> **STALE (as of M1a, 2026-08-07 onward):** this is the original M0a blueprint and no longer
+> reflects current reality — the flight-log/`Outing`/`Flugbuch.xlsx` workflow described below was
+> removed from this app (moved to a separate Flightlog service, since M6 integrated back over its
+> own API), source video is uploaded rather than read from the NAS (M1a, then M7 removed NAS
+> browsing entirely), and YouTube metadata is a live read API rather than a written `metadata.json`
+> (M5a). Kept as historical context for *why* the project exists; for what it actually does today,
+> read `.ai/context/architecture.md` and `.ai/context/features.md` instead — those are the
+> continuously-updated source of truth.
+
 ## What This Is
 
 VidFactory is a self-hosted web app that unifies a paragliding YouTube creator's whole post-flight
@@ -32,7 +41,24 @@ uploaded — they are read directly from a mounted NAS share.
 | Spreadsheet import | openpyxl (one-time `Flugbuch.xlsx` ingest) |
 | Config | YAML (`config.yml`) validated by Pydantic; mount roots via env vars |
 | Frontend | Jinja2 templates + Tailwind (CDN) + HTMX; Alpine.js/vanilla JS only on the highlight editor |
-| Container | Docker + docker-compose; deploy mirrors `C:\git\LSMFAPI` |
+| Container | Docker + docker-compose; deployed from a separate Docker-host/IaC repo, not this one — see `context/architecture.md` Deployment (stale: previously said "mirrors `C:\git\LSMFAPI`" / lg4.ch, superseded by the `sdh` host migration, 2026-08-19) |
+
+### Dependency versioning (added 2026-08-19, after the upload 500 incident)
+
+**No `poetry.lock` is committed** — every image build runs a fresh `poetry install` against
+`pyproject.toml`'s constraints, so dependencies are meant to float to their latest compatible
+release automatically. When adding or bumping a dependency, use `>=<current>,<next-major>` rather
+than a bare `^`. **Watch out for Poetry's caret on `0.x` packages** — `^0.30` (or worse, `^0.0.9`)
+locks to that exact minor/patch and silently never updates again, even with no lock file; this is
+exactly how the app shipped stuck on a `python-multipart==0.0.9` boundary-parser bug (large-file
+multipart uploads 500'd — see `context/features.md` M9) for weeks with every rebuild re-resolving
+to the same broken version. `fastapi`, `uvicorn`, `httpx`, and `python-multipart` are all still
+pre-1.0 and now use an explicit `<1.0` ceiling instead of caret for this reason. Don't add a
+dependency that never gets imported (caught `aiofiles` this way — declared, never used, removed).
+No CI step runs `pytest` before `docker-publish.yml` builds/pushes an image (tag push → straight to
+GHCR) — a dependency bump isn't verified by anything but a local run or manual post-deploy check.
+
+---
 
 **Removed from the dev-web blueprint default (not applicable here):** InfluxDB (no time-series),
 in-app JWT auth, and i18n. This is a single-operator tool; access is gated by the lg4.ch reverse proxy

@@ -41,7 +41,7 @@ Log every step of the startup sequence at `INFO`. An operator reading cold logs 
 | Service start | Name, version, environment (dev/prod) |
 | Config loaded | Source file path, key values (never secrets) — e.g. log level, DB path, mount roots |
 | DB initialised | WAL mode status, number of migrations applied vs skipped |
-| Mounts checked | Each root (`VF_VIDEOS`/`VF_MUSIC`/`VF_OUTPUT_*`/`VF_ARCHIVE`): path + readable/writable |
+| Mounts checked | Each root (`VF_MUSIC`/`VF_OUTPUT_*`/`VF_ARCHIVE` — no `VF_VIDEOS` since M7, NAS video browsing was removed): path + readable/writable |
 | GPU detected | Selected encoder (h264_nvenc / h264_qsv / libx264) and why |
 | HTTP server ready | Bind address and port |
 
@@ -104,7 +104,7 @@ Every service must expose a `GET /health` endpoint. It must:
   "uptime_seconds": 3621,
   "checks": {
     "sqlite": "ok",
-    "mounts": { "videos": "ok", "music": "ok", "output": "ok", "archive": "ok" },
+    "mounts": { "music": "ok", "output_fullflights": "ok", "output_summaries": "ok", "output_shorts": "ok", "archive": "ok" },
     "encoder": "h264_nvenc",
     "jobs_active": 1
   }
