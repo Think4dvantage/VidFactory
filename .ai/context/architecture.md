@@ -203,7 +203,7 @@ compose+env only. `.env.example` documents the two host-path vars (compose auto-
 
 **This repo does not deploy itself.** It produces three things for whatever project/host actually
 runs the container: the image (built + pushed to GHCR by `.github/workflows/docker-publish.yml` on
-every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, currently `v0.4.1`), and
+every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, currently `v0.4.2`), and
 two example config files to copy over — `docker-compose.standalone.yml` and `.env.example`
 (alongside the existing `config.yml.example`). The actual deploy target — the shared docker host at
 SSH alias `sdh` (55 TB pooled storage, GPU = dedicated Intel card, QSV via `/dev/dri`; NVIDIA CDI
@@ -216,7 +216,7 @@ real `sdh` compose file adds its own Traefik labels on top, see below). See "Sta
 
 **Repo/CI state:** on GitHub at `Think4dvantage/VidFactory`, branch `main` (pushed — not the old
 local-only `m0-foundation` branch `features.md`'s deploy blockquote used to describe). Tags
-`v0.2.0`–`v0.4.1` so far, each auto-publishing the image on push.
+`v0.2.0`–`v0.4.2` so far, each auto-publishing the image on push.
 
 **Host migration has happened (found 2026-08-19, not yet reflected anywhere else in these docs
 before now).** `xpsex`/`lg4.ch` are dead and irrelevant — the app is live on a **different** shared
@@ -231,10 +231,15 @@ before, just a new host). Confirmed via `docker inspect`/`docker logs`/`curl :80
   examples use — `/mnt/media/vidfactory/{uploads,music,library}` → `/app/{uploads,music,library}`,
   on a pooled/cache array (`cache:disk1:disk2:disk3:disk4`, 54 T total / 41 T free at last check).
   This is the "new (55 TB) host" the roadmap referred to.
-- **GPU**: `/dev/dri` is passed through (Intel QSV), but `/health` reports `"encoder":"libx264"` —
-  QSV is **not** actually being selected at runtime despite the device being present. Not
-  investigated further yet; `gpu_detector.py` or a missing render-group permission is the likely
-  culprit. Flag before assuming hardware encode is active on this host.
+- **GPU**: host has a single Intel Arc A380 (DG2, discrete — `lspci` shows no separate integrated
+  GPU; likely disabled in BIOS or absent on this CPU) at `/dev/dri`, correctly passed through and
+  VAAPI-healthy (`iHD` driver loads fine, confirmed via `ffmpeg -init_hw_device qsv=hw` debug
+  output). The actual `h264_qsv` encode still failed (`Error creating a MFX session: -9`) because
+  the image was missing `libmfx-gen1.2` — the oneVPL GPU runtime `h264_qsv` needs on top of
+  `va-driver-all`'s VAAPI layer; Jellyfin on the same host works because it bundles its own
+  self-contained `jellyfin-ffmpeg` and never needed this package. Confirmed as the actual fix by
+  installing it live in the running container (ephemeral, not persisted) and re-running the exact
+  failing encode — clean exit. Fixed for good in `Dockerfile` (not yet built/deployed).
 - **Flightlog reachability**: `VF_FLIGHTLOG_URL=http://flightlog:8000` — a sibling container on the
   same docker network, so the M6 Flightlog integration (previously never live-tested — outbound
   egress from the dev sandbox that built it was blocked) **can now actually be verified live** from
@@ -247,8 +252,9 @@ before, just a new host). Confirmed via `docker inspect`/`docker logs`/`curl :80
   on `sdh` until it's redeployed to `v0.4.1`+), builds, and a real Flightlog API call. Only
   `/health` + container/mount state were checked so far.
 
-Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.1`; `sdh` was still running `0.4.0`
-as of the last check above. See `features.md` "Host migration" roadmap item.
+Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.2`; `sdh` was running `0.4.1` (the
+M9 upload fix, not yet the M10 GPU fix) as of the last check above. See `features.md` "Host
+migration" roadmap item.
 
 ### Healthcheck
 `python:3.11-slim` has no `curl`; use Python stdlib:

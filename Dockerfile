@@ -2,9 +2,13 @@ FROM python:3.11-slim
 
 # FFmpeg (ships libx264 + h264_nvenc + h264_qsv encoders), Intel VAAPI driver for QSV,
 # and Liberation fonts for the CTA drawtext. NVENC works at runtime via the NVIDIA Container Toolkit.
+# libmfx-gen1.2 is the actual oneVPL GPU runtime h264_qsv needs on top of va-driver-all — without
+# it, VAAPI/iHD initializes fine but ffmpeg's QSV encoder still fails ("Error creating a MFX
+# session: -9"), so gpu_detector.py silently falls back to libx264 (confirmed on an Arc A380 host).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     va-driver-all \
+    libmfx-gen1.2 \
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
