@@ -5,7 +5,7 @@
     {% if listing.rel %}
       {% set parent = listing.rel.rsplit('/', 1)[0] if '/' in listing.rel else '' %}
       <button class="rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600"
-              hx-get="/api/browse/{{ root }}?path={{ parent }}" hx-target="#listing">⬆ up</button>
+              hx-get="/api/browse/{{ root }}?path={{ parent | urlencode }}" hx-target="#listing">⬆ up</button>
     {% endif %}
   </div>
 
@@ -22,17 +22,23 @@
         <td class="py-1 px-2">
           {% if e.kind == 'dir' %}
           <button class="text-sky-300 hover:underline"
-                  hx-get="/api/browse/{{ root }}?path={{ e.rel }}" hx-target="#listing">{{ e.name }}</button>
+                  hx-get="/api/browse/{{ root }}?path={{ e.rel | urlencode }}" hx-target="#listing">{{ e.name }}</button>
           {% else %}
           <span>{{ e.name }}</span>
           {% endif %}
         </td>
         <td class="py-1 px-2 text-right text-slate-400">{% if e.kind != 'dir' %}{{ e.size | filesizeformat }}{% endif %}</td>
         <td class="py-1 px-2 text-right text-slate-500 text-xs">{{ e.mtime | ts }}</td>
+        <td class="py-1 px-2 text-right">
+          {% if e.kind != 'dir' %}
+          <a href="/api/download/{{ root }}?path={{ e.rel | urlencode }}" download
+             class="text-xs rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600 text-sky-300">⬇ download</a>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
       {% if not listing.entries %}
-      <tr><td colspan="4" class="p-3 text-slate-400">Empty folder.</td></tr>
+      <tr><td colspan="5" class="p-3 text-slate-400">Empty folder.</td></tr>
       {% endif %}
     </tbody>
   </table>

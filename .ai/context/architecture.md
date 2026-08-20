@@ -59,7 +59,9 @@ libx264**. `FONTCONFIG_FILE` points at `resources/fonts.conf` so `drawtext` reso
    non-overlapping filler to reach target length; single-pass `filter_complex` (`trim`/`atrim` per
    highlight, `drawtext` overlay = highlight name, `concat=n=…:v=1:a=1`); picture highlights via
    `-loop 1 … anullsrc`. Mix music (see below) → `DATE_Summary.mp4` + credits. Separate
-   full-flight-with-music action stream-copies video and mixes music → `DATE_FullFlight_withMusic.mp4`.
+   full-flight-with-music action stream-copies video and mixes music → `DATE_FullFlight_withMusic.mp4`,
+   written to `output_fullflights` alongside the plain full flight and preview (fixed 2026-08-20 —
+   was landing in `output_summaries`; `core/projects.py:fullmusic_output_path`).
 **Editor proxy:** the highlight editor streams a **720p proxy** (`preview_file`, same timeline as the
 4K full flight) for smooth browser scrubbing; built by `concat.build_preview` (short GOP + faststart)
 automatically after the full flight, or on demand. IN/OUT marks map 1:1 to the 4K source.
@@ -108,9 +110,16 @@ down; mounts reported as degraded; deliberately public — gates Traefik routing
 "configured: yes/no", never the key itself).
 
 **browser** — `GET /browse/{root}` page · `GET /api/browse/{root}?path=` (HTMX listing) ·
-`GET /api/thumb/{root}?path=` (jpeg). Login-gated but **not** ownership-scoped — the music mount is
-a shared household resource, not per-user. **M7:** `videos` is no longer a browsable root at all
-(see Storage & mounts) — `music` is the only one left.
+`GET /api/thumb/{root}?path=` (jpeg) · `GET /api/download/{root}?path=` (2026-08-20, streams the
+file as an attachment via `FileResponse(..., filename=...)`; 404 `ENTITY_NOT_FOUND` if not a file,
+400 `PATH_NOT_ALLOWED` on traversal). Login-gated but **not** ownership-scoped for any root —
+originally fine when `music` (a shared household resource) was the only browsable root, but the nav
+link now defaults to `output_fullflights` so users can download finished videos, and every output
+root (`output_fullflights`/`output_summaries`/`output_shorts`/`archive`) is listed as a tab on
+`/browse/{root}` via `mount_roots().keys()`. In the current two-user household deployment this means
+either user can browse/download the other's finished videos — acceptable for now but a real change
+in exposure from the music-only original, worth revisiting if a less-trusted user is ever added.
+**M7:** `videos` is no longer a browsable root at all (see Storage & mounts).
 
 > Flight-log (`/flightlog*`) has been removed — see Core concept above and `features.md` M1a. There
 > is no `flightlog` router anymore; those routes 404.
@@ -175,10 +184,10 @@ on the share:
 | Env | Value | Use |
 |---|---|---|
 | `VF_MUSIC` | `/data/music` | music library (read) — **not on the share yet**; standalone deploy bind-mounts a host folder instead (see below) |
-| `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + full-flight-with-music + credits (write) |
+| `VF_OUTPUT_SUMMARIES` | `/data/summaries` | summaries + credits (write) |
 | `VF_OUTPUT_SHORTS` | `/data/shorts` | shorts (write) |
 | `VF_ARCHIVE` | `/data/Archive` | metadata.json + credits (write) |
-| (full flights) | `/data/fullflights` | concat output (wired in M2) |
+| `VF_OUTPUT_FULLFLIGHTS` | `/data/fullflights` | concat output + full-flight-with-music + preview (write, wired in M2) |
 
 **The SQLite DB lives on a LOCAL docker volume** (`VF_DATA_DIR=/app/data`, volume `vf_data`), **not on
 the NAS** — SQLite WAL mode does not work over NFS/SMB. The NAS `archive` root is only for produced
@@ -255,16 +264,33 @@ before, just a new host). Confirmed via `docker inspect`/`docker logs`/`curl :80
   same docker network, so the M6 Flightlog integration (previously never live-tested — outbound
   egress from the dev sandbox that built it was blocked) **can now actually be verified live** from
   this host, unlike the old dev-sandbox limitation.
-- Running image tag `ghcr.io/think4dvantage/vidfactory:0.4.0` at last check (2026-08-19), revision
-  label matched `main` HEAD (`55bf64d`) at that point — i.e. current as of then, but **predates the
-  M9 fix** (that shipped as `v0.4.1`); `sdh` has not been redeployed since. `/health` at last check:
-  `{"status":"ok", "sqlite":"ok", every mount "ok", "jobs_active":0}`.
-- **Not yet verified beyond base health**: login, uploads (the M9 `python-multipart` fix isn't live
-  on `sdh` until it's redeployed to `v0.4.1`+), builds, and a real Flightlog API call. Only
-  `/health` + container/mount state were checked so far.
+- **2026-08-20 recheck: `sdh` is redeployed and current.** `docker inspect` shows image
+  `ghcr.io/think4dvantage/vidfactory:0.4.3` (container up ~7h at check time), and
+  `curl :8000/health` returns `"encoder":"h264_qsv"` — the M10 fix is live, QSV is actually
+  engaging. Confirmed via container logs from a real build (a Summary + full-flight-with-music +
+  9 shorts run): every re-encode (preview build, summary, each short) used `-c:v h264_qsv`; the
+  initial concat and the full-flight-with-music mux are `-c copy` by design (no re-encode needed)
+  so they never touch the encoder — that's not a GPU miss, just a stream-copy step.
+- **Verified live this pass**: login-gated builds run end-to-end — Summary, FullFlight+music, and
+  all 12 highlight-driven shorts completed successfully on `sdh` — encoder is hardware (`h264_qsv`),
+  uploads work. Found this pass: the folder-mode music picker only scanned the immediate contents of
+  the selected folder, so any genre organized as subfolders-of-subfolders (every genre here except
+  the flat `Ambient`) silently produced music-less output — fixed in `core/music.py`
+  (`_scan_durations` now recurses). Root-caused why the shorts build (which the user confirmed did
+  have `EDM` selected) showed **no trace at all** in the logs, unlike Summary's build against the
+  same folder minutes earlier which logged "Scanned 0 music tracks": `_scan_durations`'s cache-hit
+  path (`cache_file.exists()` + matching signature) returned the cached result **before** reaching
+  the `logger.info("Scanned ...")` call — so once Summary's build had scanned+cached `EDM` as 0
+  tracks, every later request against the same unchanged folder (the shorts build included) hit
+  that cache and returned silently, with no log line to show music was ever requested. Fixed by
+  moving the log to fire on the cache-hit path too. Combined with the recursion fix above, `EDM`
+  will now scan its real tracks instead of caching an empty result in the first place. Also added a
+  request-received log line in `build_shorts_ep` (`api/routers/projects.py`) recording the raw
+  `music_path` value, as a second line of defense against this class of bug being silent.
+  **Still unverified**: a real Flightlog API call.
 
-Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.3`; `sdh` was running `0.4.1` (the
-M9 upload fix, not yet the M10 GPU fix or M11 chunked upload) as of the last check above. See
+Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.3`; `sdh` is running `0.4.3` (M9
+upload fix + M10 GPU fix + M11 chunked upload all live) as of the 2026-08-20 recheck above. See
 `features.md` "Host migration" roadmap item.
 
 ### Healthcheck

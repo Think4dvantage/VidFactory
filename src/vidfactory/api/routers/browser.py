@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from vidfactory.api.auth_deps import require_user
 from vidfactory.api.templating import templates
@@ -35,6 +35,29 @@ def browse_listing(request: Request, root: str, path: str = ""):
             content={"error": {"code": "PATH_NOT_ALLOWED", "message": str(exc)}},
         )
     return templates.TemplateResponse(request, "partials/listing.html", {"listing": listing})
+
+
+@router.get("/api/download/{root}")
+def download(root: str, path: str = Query("")):
+    try:
+        target = filebrowser.resolve(root, path)
+    except filebrowser.PathNotAllowed as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "PATH_NOT_ALLOWED", "message": str(exc)}},
+        )
+    if not target.is_file():
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "code": "ENTITY_NOT_FOUND",
+                    "message": f"No file at '{path}' under root '{root}'.",
+                    "details": {"root": root, "path": path},
+                }
+            },
+        )
+    return FileResponse(target, filename=target.name)
 
 
 @router.get("/api/thumb/{root}")

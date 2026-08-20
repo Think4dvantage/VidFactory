@@ -129,7 +129,7 @@ def summary_output_path(project: Project) -> str:
 
 
 def fullmusic_output_path(project: Project) -> str:
-    root = get_config().mount_roots()["output_summaries"]
+    root = get_config().mount_roots()["output_fullflights"]
     return str(root / f"{_stem(project)}_FullFlight_withMusic.mp4")
 
 

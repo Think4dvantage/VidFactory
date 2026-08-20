@@ -443,6 +443,10 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
     music_path = str(form.get("music_path") or "")
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
+    logger.info(
+        "[VF:shorts] build requested project=%s mode=%s count=%s music_path=%r",
+        project_id, mode, count, music_path,
+    )
     job = registry.run("shorts", user.id, _shorts_target(project_id, user.id, mode, count, music_path, mv, ov))
     return {"job_id": job.id}
 

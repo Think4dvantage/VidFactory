@@ -35,7 +35,11 @@ def _folder_cache_file(folder: Path, cache_dir: Path) -> Path:
 
 
 def _scan_durations(folder: Path, runner: FFmpegRunner, cache_dir: Path) -> dict[str, float]:
-    files = sorted(p for p in folder.iterdir() if p.suffix.lower() in AUDIO_EXT and p.is_file())
+    # Recursive: genre folders are commonly organized as subfolders-of-subfolders
+    # (e.g. `EDM/1. Lights/*.wav`) rather than flat directories of tracks — a plain
+    # iterdir() silently finds 0 files for those and callers get music-less output
+    # with no error anywhere.
+    files = sorted(p for p in folder.rglob("*") if p.suffix.lower() in AUDIO_EXT and p.is_file())
     signature = {str(p): (p.stat().st_size, int(p.stat().st_mtime)) for p in files}
 
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -44,11 +48,17 @@ def _scan_durations(folder: Path, runner: FFmpegRunner, cache_dir: Path) -> dict
         try:
             cached = json.loads(cache_file.read_text(encoding="utf-8"))
             if cached.get("signature") == {k: list(v) for k, v in signature.items()}:
-                return {k: float(v) for k, v in cached["durations"].items()}
+                durations = {k: float(v) for k, v in cached["durations"].items()}
+                # Log unconditionally, even on a cache hit — a prior scan that cached 0 tracks
+                # (e.g. before this function scanned recursively) would otherwise short-circuit
+                # here with no trace at all, making a repeat "no music" build look like the
+                # picker was never touched.
+                logger.info("Scanned %d music tracks in %s (cached)", len(durations), folder)
+                return durations
         except (ValueError, KeyError):
             pass
 
-    durations: dict[str, float] = {}
+    durations = {}
     for p in files:
         try:
             durations[str(p)] = runner.get_video_info(str(p))[2]
@@ -73,6 +83,7 @@ def select_tracks(music_path: str, needed_seconds: float, runner: FFmpegRunner, 
 
     durations = _scan_durations(p, runner, cache_dir)
     if not durations:
+        logger.warning("No playable audio files found under %s (recursively) — building without music", p)
         return MusicSelection(mode="none")
     items = list(durations.items())
     random.shuffle(items)
