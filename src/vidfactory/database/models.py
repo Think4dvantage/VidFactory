@@ -23,6 +23,9 @@ class User(Base):
     # Plaintext: it's a bearer credential VidFactory must resend verbatim on every Flightlog call,
     # not a password — nothing to hash it against. Never returned in any API response body.
     flightlog_api_key: Mapped[str | None] = mapped_column(String)
+    # Plaintext for the same reason as flightlog_api_key: a bearer credential presented verbatim
+    # by external callers (see api/routers/integration.py), nothing to hash it against on receipt.
+    api_key: Mapped[str | None] = mapped_column(String, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     projects: Mapped[list["Project"]] = relationship(back_populates="owner")

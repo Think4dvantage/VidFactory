@@ -61,6 +61,23 @@ def get_user_for_token(db: DbSession, token: str) -> User | None:
     return db.get(User, sess.user_id)
 
 
+def generate_api_key(db: DbSession, user: User) -> str:
+    """Generate (replacing any existing one) this user's VF API key for /api/integration/v1.
+
+    Returns the raw key -- the caller shows it once; it is never returned by any other endpoint.
+    """
+    key = secrets.token_urlsafe(32)
+    user.api_key = key
+    db.commit()
+    return key
+
+
+def get_user_for_api_key(db: DbSession, key: str) -> User | None:
+    if not key:
+        return None
+    return db.execute(select(User).where(User.api_key == key)).scalar_one_or_none()
+
+
 def delete_session(db: DbSession, token: str) -> None:
     sess = db.get(Session, token)
     if sess is not None:

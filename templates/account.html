@@ -18,5 +18,24 @@
       <button class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">Save</button>
     </form>
   </section>
+
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
+    <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">VidFactory API key</h2>
+    <p class="text-sm text-slate-300 mb-2">
+      Status: {% if api_key %}<span class="text-emerald-400">configured</span>{% else %}<span class="text-slate-500">not configured</span>{% endif %}
+    </p>
+    <p class="text-xs text-slate-500 mb-2">
+      For an external tool (e.g. a YouTube-management pipeline) to pull your project data from
+      <code>/api/integration/v1</code> without a browser session. Send it as
+      <code>Authorization: Bearer &lt;key&gt;</code>. Only you can see this page, so it stays
+      visible here for reuse -- regenerating immediately replaces the old key everywhere it's used.
+    </p>
+    {% if api_key %}
+    <p class="text-sm font-mono bg-slate-900 border border-slate-600 rounded px-2 py-1 mb-2 break-all">{{ api_key }}</p>
+    {% endif %}
+    <form hx-post="/api/account/api-key" hx-swap="none">
+      <button class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm">{% if api_key %}Regenerate{% else %}Generate{% endif %} key</button>
+    </form>
+  </section>
 </div>
 {% endblock %}

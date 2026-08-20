@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from vidfactory import __version__
 from vidfactory.api.auth_deps import require_user
-from vidfactory.api.routers import auth, browser, projects, sse, youtube
+from vidfactory.api.routers import auth, browser, integration, projects, sse, youtube
 from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 from vidfactory.core import auth as auth_core
@@ -59,6 +59,7 @@ app = FastAPI(title="VidFactory", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(auth.router)
 app.include_router(browser.router)
+app.include_router(integration.router)
 app.include_router(projects.router)
 app.include_router(sse.router)
 app.include_router(youtube.router)

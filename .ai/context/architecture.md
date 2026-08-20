@@ -29,7 +29,7 @@ named-short sources. `launch` and `landing` are just Highlights with a `role` an
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `users` | `id`, `username`(unique), `password_hash`(`scrypt$salt$digest`), `flightlog_api_key`(nullable, plaintext bearer credential), `created_at` | No roles/signup UI — bootstrap user from `VF_BOOTSTRAP_USERNAME`/`_PASSWORD` at first boot, additional users via `scripts/create_user.py` |
+| `users` | `id`, `username`(unique), `password_hash`(`scrypt$salt$digest`), `flightlog_api_key`(nullable, plaintext bearer credential), `api_key`(nullable, unique, plaintext bearer credential — migration `0009`, see `## API Contracts` → **integration**), `created_at` | No roles/signup UI — bootstrap user from `VF_BOOTSTRAP_USERNAME`/`_PASSWORD` at first boot, additional users via `scripts/create_user.py` |
 | `sessions` | `token`(PK, opaque), `user_id→users`, `created_at`, `expires_at` | ~30-day cookie session (`vf_session`, httponly); logout deletes the row |
 | `projects` | `id`, `owner_id→users`(nullable), `date` (nullable), `external_flight_id` (nullable `TEXT`, Flightlog's flight id — no FK, separate service), `flight_type`('normal'\|'hike_and_fly'), `full_flight_file`, `preview_file` (720p proxy), `summary_file`, `fullflight_music_file`, `youtube_metadata_file`, `created_at` | **top-level**; standalone (migration 0006 added `date`/`external_flight_id`, replacing the old `outing_id` FK; 0007 added `owner_id`; 0008 retyped `external_flight_id` to `TEXT` — see Core concept above). Created via `POST /projects/new`. A project not owned by the requesting user 404s (never 403) |
 | `source_parts` | `id`, `project_id→projects`, `file`, `order` | raw source video parts (uploaded — see Storage & mounts, M7), user-orderable |
@@ -171,6 +171,32 @@ logged at INFO and never raised into this endpoint. `POST /api/projects/{id}/fli
 (body `{youtube_url, label?}`) forwards to Flightlog's `PUT .../links/video/{project_id}` —
 called by the external YTChannelMgmt MCP once it actually publishes a video (VidFactory's own
 outputs are local files with no public URL, so there's no automatic trigger after a render).
+
+**integration** (M12, `api/routers/integration.py`) — VidFactory's own external contract, mirroring
+the shape of Flightlog's `/api/integration/v1` that this app itself calls. API-key authenticated
+instead of session-cookie: `Authorization: Bearer <key>` resolved by `require_api_user`
+(`api/auth_deps.py`) to a `User` via `users.api_key` (migration `0009`, plaintext — same rationale
+as `flightlog_api_key`: a bearer credential presented verbatim, nothing to hash it against on
+receipt). Each user generates/regenerates their own key on `/account` (`POST /api/account/api-key`,
+`hx-post`+`hx-swap="none"`+`HX-Redirect` like the existing Flightlog-key form — a plain form POST
+returning HTML directly would let an F5 on the result page silently mint a new key and invalidate
+whatever was already pasted elsewhere). The key stays visible on `/account` on every later visit
+(only its own owner can load that page, so persistent-visible is the honest tradeoff given it's
+stored plaintext) rather than "shown once" — never returned by any other endpoint. **Per-user, not
+a single global key** — a key only ever sees its own user's projects, keeping the M5b ownership
+boundary intact for this door too. `require_api_user` logs a warning on every rejected key/missing
+header, and `integration.py` logs the calling username on every successful call, since this is the
+one surface driven entirely by an external tool with no other visibility into it. Routes, all under
+`/api/integration/v1`:
+- `GET /projects` — lightweight discovery listing (`project_id`, `date`, `flight_type`,
+  `external_flight_id`, `has_full_flight`/`has_summary`/`has_fullflight_music`) for a tool that
+  needs to find out what's new rather than being told a project id.
+- `GET /projects/{id}/youtube-metadata`, `POST /projects/{id}/flightlog-link` — thin wrappers that
+  call the exact same handlers as the session-authed `youtube` router above (only the auth
+  dependency differs; zero duplicated logic). Ownership works identically: a project owned by a
+  different user 404s `ENTITY_NOT_FOUND`, same as the session-authed routes.
+Built for the external YouTube-management repo to pull metadata and push back published-video
+links without a browser session. **Not yet deployed or live-verified against that repo.**
 
 ---
 

@@ -9,12 +9,16 @@ still only run one DB query per request.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from vidfactory.core.auth import SESSION_COOKIE, get_user_for_token
+from vidfactory.core.auth import SESSION_COOKIE, get_user_for_api_key, get_user_for_token
 from vidfactory.database.db import get_db
 from vidfactory.database.models import User
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
@@ -37,3 +41,27 @@ def require_user(request: Request, user: User | None = Depends(get_current_user)
     # Starlette's default HTTPException handler forwards `headers`, so a 3xx + Location here
     # redirects the browser even though the handler otherwise emits a JSON body.
     raise HTTPException(status_code=303, headers={"Location": "/login"})
+
+
+def require_api_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """Authenticates via `Authorization: Bearer <key>` -- for external tools calling
+    /api/integration/v1 without a browser session (see api/routers/integration.py)."""
+    auth_header = request.headers.get("authorization", "")
+    key = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+    user = get_user_for_api_key(db, key) if key else None
+    if user is None:
+        logger.warning(
+            "[VF:integration] rejected request to %s: %s",
+            request.url.path, "no Authorization header" if not key else "unknown API key",
+        )
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": {
+                    "code": "AUTH_REQUIRED",
+                    "message": "Valid API key required (Authorization: Bearer <key>).",
+                    "details": {},
+                }
+            },
+        )
+    return user

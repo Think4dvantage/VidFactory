@@ -56,8 +56,16 @@ def logout(request: Request, db: Session = Depends(get_db)):
 @router.get("/account", include_in_schema=False)
 def account_page(request: Request, user: User = Depends(require_user)):
     return templates.TemplateResponse(
-        request, "account.html", {"flightlog_key_set": bool(user.flightlog_api_key)}
+        request,
+        "account.html",
+        {"flightlog_key_set": bool(user.flightlog_api_key), "api_key": user.api_key},
     )
+
+
+@router.post("/api/account/api-key", include_in_schema=False)
+def generate_api_key_ep(user: User = Depends(require_user), db: Session = Depends(get_db)):
+    auth.generate_api_key(db, user)
+    return Response(status_code=204, headers={"HX-Redirect": "/account"})
 
 
 @router.post("/api/account/flightlog-key", include_in_schema=False)
