@@ -21,6 +21,7 @@ class Job:
     id: str
     kind: str
     owner_id: int
+    project_id: int = 0
     status: str = "pending"  # pending | running | done | error | cancelled
     stage: str = ""
     percent: float = 0.0
@@ -42,6 +43,7 @@ class Job:
         return {
             "id": self.id,
             "kind": self.kind,
+            "project_id": self.project_id,
             "status": self.status,
             "stage": self.stage,
             "percent": self.percent,
@@ -76,9 +78,25 @@ class JobRegistry:
         with self._lock:
             return sum(1 for j in self._jobs.values() if j.status == "running")
 
-    def run(self, kind: str, owner_id: int, target: Callable[[Job], Optional[str]]) -> Job:
+    def find_active(self, kind: str, project_id: int) -> Optional[Job]:
+        """A non-terminal job of `kind` already targeting `project_id`'s output, if any.
+
+        Two builds of the same kind for the same project write to the identical output path
+        (e.g. summary_output_path() is deterministic per project) — running them concurrently
+        interleaves both processes' writes into one corrupted file with no error from either
+        side. Callers should check this before starting a new build of that kind.
+        """
+        with self._lock:
+            for j in self._jobs.values():
+                if j.kind == kind and j.project_id == project_id and not j.is_terminal:
+                    return j
+        return None
+
+    def run(
+        self, kind: str, owner_id: int, target: Callable[[Job], Optional[str]], project_id: int = 0
+    ) -> Job:
         """Create a job and run `target(job)` in a worker thread. `target` returns a result string."""
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind, owner_id=owner_id)
+        job = Job(id=uuid.uuid4().hex[:12], kind=kind, owner_id=owner_id, project_id=project_id)
         with self._lock:
             self._jobs[job.id] = job
 

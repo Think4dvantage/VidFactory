@@ -300,7 +300,19 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
   });
 });
 
-// Generic build runner for the summary / full-music buttons (form -> job -> SSE).
+// Generic build runner for the summary / full-music / shorts buttons (form -> job -> SSE).
+function followGenericBuild(pfx, btn, jobId) {
+  document.getElementById(pfx + '-progress').hidden = false;
+  btn.disabled = true;
+  window.VF.followJob(jobId, (d) => {
+    document.getElementById(pfx + '-stage').textContent = d.stage || d.status;
+    document.getElementById(pfx + '-pct').textContent = d.percent;
+    document.getElementById(pfx + '-bar').value = d.percent;
+    if (d.status === 'done') { document.getElementById(pfx + '-pct').textContent = '100'; document.getElementById(pfx + '-bar').value = 100; document.getElementById(pfx + '-result').textContent = '✅ ' + (d.result || ''); btn.disabled = false; }
+    if (d.status === 'error') { document.getElementById(pfx + '-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
+  });
+}
+
 document.querySelectorAll('[data-build]').forEach((btn) => {
   btn.addEventListener('click', async () => {
     const pfx = btn.dataset.prefix;
@@ -308,28 +320,23 @@ document.querySelectorAll('[data-build]').forEach((btn) => {
     const data = new URLSearchParams(new FormData(form));
     btn.disabled = true;
     const r = await fetch(btn.dataset.build, { method: 'POST', body: data });
-    if (!r.ok) { document.getElementById(pfx + '-result').textContent = '❌ ' + (await r.text()); btn.disabled = false; return; }
+    if (!r.ok) {
+      const body = await r.text();
+      let msg = body;
+      try { msg = JSON.parse(body).error.message; } catch (e) { /* not a JSON error body */ }
+      document.getElementById(pfx + '-result').textContent = '❌ ' + msg;
+      btn.disabled = false;
+      return;
+    }
     const { job_id } = await r.json();
-    document.getElementById(pfx + '-progress').hidden = false;
-    window.VF.followJob(job_id, (d) => {
-      document.getElementById(pfx + '-stage').textContent = d.stage || d.status;
-      document.getElementById(pfx + '-pct').textContent = d.percent;
-      document.getElementById(pfx + '-bar').value = d.percent;
-      if (d.status === 'done') { document.getElementById(pfx + '-pct').textContent = '100'; document.getElementById(pfx + '-bar').value = 100; document.getElementById(pfx + '-result').textContent = '✅ ' + (d.result || ''); btn.disabled = false; }
-      if (d.status === 'error') { document.getElementById(pfx + '-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
-    });
+    followGenericBuild(pfx, btn, job_id);
   });
 });
 
-document.getElementById('build-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('build-btn');
-  btn.disabled = true;
-  console.log('[VF:project] build requested');
-  const r = await fetch('/api/projects/{{ project.id }}/build', { method: 'POST' });
-  if (!r.ok) { document.getElementById('build-result').textContent = '❌ ' + (await r.text()); btn.disabled = false; return; }
-  const { job_id } = await r.json();
+function followFullFlightBuild(btn, jobId) {
   document.getElementById('build-progress').hidden = false;
-  window.VF.followJob(job_id, (d) => {
+  btn.disabled = true;
+  window.VF.followJob(jobId, (d) => {
     document.getElementById('b-stage').textContent = d.stage || d.status;
     document.getElementById('b-pct').textContent = d.percent;
     document.getElementById('b-speed').textContent = d.speed || '';
@@ -342,6 +349,42 @@ document.getElementById('build-btn').addEventListener('click', async () => {
     }
     if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
   });
+}
+
+document.getElementById('build-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('build-btn');
+  btn.disabled = true;
+  console.log('[VF:project] build requested');
+  const r = await fetch('/api/projects/{{ project.id }}/build', { method: 'POST' });
+  if (!r.ok) { document.getElementById('build-result').textContent = '❌ ' + (await r.text()); btn.disabled = false; return; }
+  const { job_id } = await r.json();
+  followFullFlightBuild(btn, job_id);
 });
+
+// Resume watching any build already running for this project -- e.g. after navigating away
+// and back. Without this, a still-running job looks identical to a page that was never used to
+// start one, which is exactly what leads to clicking "Build" a second time and corrupting the
+// first job's output (both write to the same deterministic path).
+(async function resumeActiveJobs() {
+  const KIND_PREFIX = { summary: 'sum', fullmusic: 'fm', shorts: 'sh' };
+  let jobs;
+  try {
+    jobs = (await (await fetch('/api/jobs')).json()).data;
+  } catch (e) {
+    console.error('[VF:project] could not check for in-progress builds', e);
+    return;
+  }
+  for (const job of jobs) {
+    if (job.project_id !== {{ project.id }} || job.status !== 'running' && job.status !== 'pending') continue;
+    if (job.kind === 'concat') {
+      followFullFlightBuild(document.getElementById('build-btn'), job.id);
+      continue;
+    }
+    const pfx = KIND_PREFIX[job.kind];
+    if (!pfx) continue;  // e.g. 'preview' has no progress UI on this page
+    const btn = document.querySelector(`[data-prefix="${pfx}"]`);
+    if (btn) followGenericBuild(pfx, btn, job.id);
+  }
+})();
 </script>
 {% endblock %}

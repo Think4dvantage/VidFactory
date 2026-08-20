@@ -26,6 +26,23 @@ from vidfactory.models.highlight import HighlightIn, HighlightOut
 
 logger = logging.getLogger(__name__)
 
+
+def _build_conflict(kind: str) -> JSONResponse:
+    # Every build kind writes to a deterministic, project-scoped output path (e.g.
+    # summary_output_path() is the same file for every summary build of a given project) --
+    # running two of the same kind concurrently interleaves both processes' writes into one
+    # corrupted output with neither side reporting an error. Block the second request instead.
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": {
+                "code": "CONFLICT",
+                "message": f"A {kind} build is already running for this project.",
+                "details": {"kind": kind},
+            }
+        },
+    )
+
 router = APIRouter(dependencies=[Depends(require_user)])
 
 
@@ -113,7 +130,9 @@ def build_preview_ep(project_id: int, db: Session = Depends(get_db), user: User 
         return Response(status_code=404)
     if not project.full_flight_file:
         return Response("Build the full flight first.", status_code=400)
-    job = registry.run("preview", user.id, _preview_target(project_id, user.id))
+    if registry.find_active("preview", project_id):
+        return _build_conflict("preview")
+    job = registry.run("preview", user.id, _preview_target(project_id, user.id), project_id=project_id)
     return {"job_id": job.id}
 
 
@@ -371,7 +390,9 @@ def build_fullflight(project_id: int, db: Session = Depends(get_db), user: User 
         return Response(status_code=404)
     if not project.source_parts:
         return Response("No source parts added.", status_code=400)
-    job = registry.run("concat", user.id, _build_target(project_id, user.id))
+    if registry.find_active("concat", project_id):
+        return _build_conflict("concat")
+    job = registry.run("concat", user.id, _build_target(project_id, user.id), project_id=project_id)
     return {"job_id": job.id}
 
 
@@ -409,7 +430,12 @@ async def build_summary_ep(project_id: int, request: Request, db: Session = Depe
     music_path = str(form.get("music_path") or "")
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
-    job = registry.run("summary", user.id, _summary_target(project_id, user.id, target, music_path, mv, ov))
+    if registry.find_active("summary", project_id):
+        return _build_conflict("summary")
+    job = registry.run(
+        "summary", user.id, _summary_target(project_id, user.id, target, music_path, mv, ov),
+        project_id=project_id,
+    )
     return {"job_id": job.id}
 
 
@@ -426,7 +452,12 @@ async def build_fullmusic_ep(project_id: int, request: Request, db: Session = De
         return Response("Select music.", status_code=400)
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
-    job = registry.run("fullmusic", user.id, _fullmusic_target(project_id, user.id, music_path, mv, ov))
+    if registry.find_active("fullmusic", project_id):
+        return _build_conflict("fullmusic")
+    job = registry.run(
+        "fullmusic", user.id, _fullmusic_target(project_id, user.id, music_path, mv, ov),
+        project_id=project_id,
+    )
     return {"job_id": job.id}
 
 
@@ -447,7 +478,12 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
         "[VF:shorts] build requested project=%s mode=%s count=%s music_path=%r",
         project_id, mode, count, music_path,
     )
-    job = registry.run("shorts", user.id, _shorts_target(project_id, user.id, mode, count, music_path, mv, ov))
+    if registry.find_active("shorts", project_id):
+        return _build_conflict("shorts")
+    job = registry.run(
+        "shorts", user.id, _shorts_target(project_id, user.id, mode, count, music_path, mv, ov),
+        project_id=project_id,
+    )
     return {"job_id": job.id}
 
 
@@ -644,7 +680,7 @@ def _build_target(project_id: int, owner_id: int):
             project.full_flight_file = result["output"]
             db.commit()
             # Auto-build the 720p editor proxy in the background once the full flight exists.
-            registry.run("preview", owner_id, _preview_target(project_id, owner_id))
+            registry.run("preview", owner_id, _preview_target(project_id, owner_id), project_id=project_id)
             return result["output"]
 
     return target
