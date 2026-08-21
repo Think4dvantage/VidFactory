@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -161,6 +162,19 @@ def _track_meta(runner: FFmpegRunner, file: str) -> tuple[str | None, str | None
         return None, None
 
 
+# StreamBeats ships its library as bare audio files with no embedded ID3/format tags, named
+# "<track number>. <Artist> - <Title>.<ext>" (e.g. "21. Harris Heller - High Tide.mp3"). When
+# there's no tag to trust, this is the only source for a real artist/title split — without it,
+# the whole filename (including the artist) would get dumped into "title" verbatim.
+_FILENAME_ARTIST_TITLE = re.compile(r"^\s*\d+\.\s*(?P<artist>.+?)\s*-\s*(?P<title>.+?)\s*$")
+
+
+def _split_filename_credit(stem: str) -> tuple[str, str | None]:
+    """Best-effort (title, artist) from a filename stem, for tracks with no usable tags."""
+    m = _FILENAME_ARTIST_TITLE.match(stem)
+    return (m.group("title"), m.group("artist")) if m else (stem, None)
+
+
 def resolve_track_credits(tracks: list[str], runner: FFmpegRunner) -> list[dict]:
     """Probe each track's embedded title/artist tags once, at build time, so a later render
     (e.g. the project page's credits box) never has to shell out to ffprobe just to display
@@ -168,6 +182,8 @@ def resolve_track_credits(tracks: list[str], runner: FFmpegRunner) -> list[dict]
     out = []
     for t in tracks:
         title, artist = _track_meta(runner, t)
+        if not title and not artist:
+            title, artist = _split_filename_credit(Path(t).stem)
         out.append({"file": t, "title": title or Path(t).stem, "artist": artist})
     return out
 
@@ -180,12 +196,17 @@ def normalize_music_credits(value) -> list[dict]:
     if not value:
         return []
     if isinstance(value, str):
-        return [{"file": value, "title": Path(value).stem, "artist": None}]
+        title, artist = _split_filename_credit(Path(value).stem)
+        return [{"file": value, "title": title, "artist": artist}]
     if isinstance(value, list):
-        return [
-            v if isinstance(v, dict) else {"file": v, "title": Path(v).stem, "artist": None}
-            for v in value
-        ]
+        out = []
+        for v in value:
+            if isinstance(v, dict):
+                out.append(v)
+            else:
+                title, artist = _split_filename_credit(Path(v).stem)
+                out.append({"file": v, "title": title, "artist": artist})
+        return out
     return []
 
 

@@ -57,6 +57,21 @@ def test_resolve_track_credits_uses_tags_and_falls_back_to_filename(monkeypatch)
     ]
 
 
+def test_resolve_track_credits_splits_streambeats_filename_when_no_tags(monkeypatch):
+    # StreamBeats ships files with no embedded tags, named "<N>. <Artist> - <Title>.<ext>" —
+    # without this parse, "Harris Heller" ends up jammed into the title as raw filename text
+    # (the bug the user actually saw after a real deploy).
+    monkeypatch.setattr(music, "_track_meta", lambda runner, file: (None, None))
+
+    credits = music.resolve_track_credits(["/library/EDM/21. Harris Heller - High Tide.mp3"], _StubRunner())
+
+    assert credits == [{
+        "file": "/library/EDM/21. Harris Heller - High Tide.mp3",
+        "title": "High Tide",
+        "artist": "Harris Heller",
+    }]
+
+
 def test_normalize_music_credits_handles_every_historical_shape():
     assert music.normalize_music_credits(None) == []
     assert music.normalize_music_credits("") == []
@@ -66,6 +81,9 @@ def test_normalize_music_credits_handles_every_historical_shape():
     assert music.normalize_music_credits(["a/one.mp3", "b/two.mp3"]) == [
         {"file": "a/one.mp3", "title": "one", "artist": None},
         {"file": "b/two.mp3", "title": "two", "artist": None},
+    ]
+    assert music.normalize_music_credits("old/21. Harris Heller - High Tide.mp3") == [
+        {"file": "old/21. Harris Heller - High Tide.mp3", "title": "High Tide", "artist": "Harris Heller"}
     ]
     current = [{"file": "x.mp3", "title": "X", "artist": "Someone"}]
     assert music.normalize_music_credits(current) == current
