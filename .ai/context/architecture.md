@@ -77,10 +77,35 @@ a tooltip (kind/alt-change/climb-rate), click near one to seek exactly to it.
 3. **Shorts** (`shorts.py`) — all clips trimmed from the **full flight**, normalized to vertical
    1080×1920 (horizontal source: `crop=ih*9/16:ih…,scale=1080:1920`; **`setsar=1:1`+`fps=30` on every
    stream**; one `-i` per clip; CTA = looped image + `anullsrc`).
-   - **Highlight-driven:** `highlight (hook) → launch? → random flying parts → landing? → CTA`, kept
-     **under 30 s**; short title = highlight name. (`launch`/`landing` skipped if not marked.)
-   - **Random-pool (legacy):** `launch? → flying → landing? → CTA`; random sampling with chronological
-     re-sort and a `UsedMap` (per-file consumed ranges) so a batch never reuses footage.
+   - **Highlight-driven:** `highlight (hook) → hike×2? → launch? → 3 random flying parts → landing? →
+     CTA`; short title = highlight name. (`launch`/`landing` skipped if not marked; the hike pair only
+     for `flight_type == "hike_and_fly"`, M15.) No longer reliably **under 30 s** once the hike pair is
+     included (6+2×3+4+3×3+4+3 = 32s with defaults) — the M4 cap was superseded by this composition
+     change; YouTube Shorts' own 60s ceiling is the only hard limit left.
+   - **Random-pool (legacy):** same order minus the hook — `hike×2? → launch? → flying → landing? →
+     CTA`; random sampling with chronological re-sort and a `UsedMap` (per-file consumed ranges) so a
+     batch never reuses footage.
+   - **M15 (2026-08-21): hike/flying split + distributed sampling.** `_flying_pool()`
+     (`api/routers/projects.py`) now excludes the prepended hike segment from the flying pool
+     (`core/concat.hike_output_duration()` recomputes the hike's on-timeline length — sped-up
+     duration or raw sum — the same math `concatenate()` uses to prepend it, since that boundary was
+     never persisted anywhere) — flying clips for a Hike & Fly short can no longer land inside the
+     hike footage. Two hike clips are sampled from `[0, hike_end)` the same way flying clips are
+     sampled from `[hike_end, full_dur)`. Root cause of the original complaint (all-random flying
+     clips clustering in one small region of a 12.07.2026 project instead of spreading across the
+     whole flight): `shorts.pick_clips()` picked among leftover *windows* with equal probability
+     regardless of window size — once a region got used, subtraction fragmented it into many small
+     windows that then outnumbered (and so out-competed) any single large untouched region, so later
+     picks kept clustering wherever the first few picks happened to land, purely by chance, not by any
+     size-weighting. Fixed by splitting the pool into `count` equal-width **time buckets** and
+     drawing one subclip per bucket (falling back to the whole pool — logged — only if a bucket has
+     no free room), guaranteeing genuine spread instead of relying on statistics. `launch`/`landing`
+     highlights are user-marked and bypass this pool entirely; if one is mismarked inside the hike
+     segment, `_shorts_target` logs a warning (`"launch highlight starts ... before the hike segment
+     ends"`) rather than silently clamping someone's manual mark. New `ShortsSection.hike_clip_count`
+     (default 2). **Verified locally** (`tests/backend/test_shorts_engine.py`,
+     `tests/backend/test_shorts_build.py`) — not yet re-verified against a real rebuild of the
+     12.07.2026 project (needs a live host; not yet deployed).
 4. **YouTube metadata** (`core/youtube_meta.py`, M5a — shipped as a live read API, not a written
    `metadata.json`, see `## API Contracts` → **youtube** below): highlights, summary content order,
    shorts, and — since M6 — Flightlog flight/segment data when the project has one linked, for a

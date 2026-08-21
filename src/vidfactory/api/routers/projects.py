@@ -17,7 +17,7 @@ import re
 
 from vidfactory.core import chunked_upload, filebrowser, flightlog_hints, gpu_detector, highlights, music, projects, summary
 from vidfactory.core import shorts as shorts_engine
-from vidfactory.core.concat import build_preview, concatenate, plan as concat_plan
+from vidfactory.core.concat import build_preview, concatenate, hike_output_duration, plan as concat_plan
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
@@ -487,9 +487,12 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
     return {"job_id": job.id}
 
 
-def _flying_pool(project: Project, full_dur: float) -> list[tuple[float, float]]:
-    ranges = [(p.start, p.end) for p in project.pools if p.kind == "flying"]
-    return ranges or [(0.0, full_dur)]
+def _flying_pool(project: Project, full_dur: float, start: float = 0.0) -> list[tuple[float, float]]:
+    """Flying-only ranges on the full-flight timeline, clipped to start at `start` (past any
+    prepended Hike & Fly segment, so random flying picks never land in the hike footage)."""
+    ranges = [(max(p.start, start), p.end) for p in project.pools if p.kind == "flying"]
+    ranges = [(s, e) for s, e in ranges if e > s]
+    return ranges or [(start, full_dur)]
 
 
 def _role_clip(hls, role: str, cap: float) -> tuple[float, float] | None:
@@ -526,7 +529,27 @@ def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_
             hls = highlights.list_highlights(db, project_id)
             launch = _role_clip(hls, "launch", sc.launch_max)
             landing = _role_clip(hls, "landing", sc.landing_max)
-            pool = _flying_pool(project, dur)
+
+            hike = project.hike
+            use_hike = bool(hike and hike.sources and project.flight_type == "hike_and_fly")
+            hike_end = 0.0
+            hike_pool: list[tuple[float, float]] = []
+            if use_hike:
+                hike_end = max(0.0, min(hike_output_duration(list(hike.sources), hike.speed_factor, runner), dur))
+                hike_pool = [(0.0, hike_end)]
+                # launch/landing are user-marked and bypass the flying pool entirely (never
+                # de-duped against `used`, never clamped here) — if a pilot marked launch while
+                # still inside the sped-up hike segment, the "launch" clip is actually hike
+                # footage. Not our call to silently clamp a user's mark; just make it diagnosable.
+                if launch and launch[0] < hike_end:
+                    logger.warning(
+                        "[VF:shorts] project=%s launch highlight starts at %.1fs, before the "
+                        "hike segment ends at %.1fs — the 'launch' clip in this short will "
+                        "actually be hike footage",
+                        project_id, launch[0], hike_end,
+                    )
+
+            pool = _flying_pool(project, dur, start=hike_end)
             used: shorts_engine.UsedMap = {}
 
             if mode == "highlight":
@@ -545,10 +568,20 @@ def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_
                 if job.cancel_event.is_set():
                     break
                 job.set_stage(f"Short {i + 1}/{n}")
+                hike_clips = (
+                    shorts_engine.pick_clips(hike_pool, sc.hike_clip_count, sc.clip_duration, used, full)
+                    if use_hike else []
+                )
                 flying = shorts_engine.pick_clips(pool, sc.flying_clip_count, sc.clip_duration, used, full)
-                clips = ([hook] if hook else []) + ([launch] if launch else []) + flying + ([landing] if landing else [])
                 if not flying:
                     raise ValueError("Flying pool exhausted — not enough unused footage.")
+                clips = (
+                    ([hook] if hook else [])
+                    + hike_clips
+                    + ([launch] if launch else [])
+                    + flying
+                    + ([landing] if landing else [])
+                )
                 total_needed = sum(e - s for s, e in clips) + sc.cta_duration
                 bed, tracks = (None, [])
                 if music_path:
@@ -572,7 +605,7 @@ def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_
                 db.add(Short(
                     project_id=project_id, output_file=res["output"], short_type=mode,
                     duration=res["duration"], source_highlight_id=hid, title=title,
-                    segments_used={"hook": hook, "launch": launch, "flying": flying,
+                    segments_used={"hook": hook, "hike": hike_clips, "launch": launch, "flying": flying,
                                    "landing": landing, "music": (tracks[0] if tracks else None)},
                 ))
                 db.commit()

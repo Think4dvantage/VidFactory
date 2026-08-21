@@ -2,9 +2,13 @@
 
 All clips are trimmed from the full flight via input-seeking. Ported from ShortFactory's
 short_builder (normalize filters, UsedMap de-dup, CTA end screen). Two modes are orchestrated by the
-caller: highlight-driven (hook -> launch? -> flying -> landing? -> CTA) and random-pool
-(launch? -> flying -> landing? -> CTA). Load-bearing details kept verbatim: setsar=1:1 + fps=30 on
-every stream, one input per clip, CTA = looped image + anullsrc, chronological sort after sampling.
+caller: highlight-driven (hook -> hike?x2 -> launch? -> flying -> landing? -> CTA) and random-pool
+(hike?x2 -> launch? -> flying -> landing? -> CTA) — the hike pair only for Hike & Fly projects
+(`api/routers/projects.py:_shorts_target`). Load-bearing details kept verbatim: setsar=1:1 +
+fps=30 on every stream, one input per clip, CTA = looped image + anullsrc, chronological sort
+after sampling. `pick_clips` spreads its picks across equal-width time buckets rather than
+picking uniformly among leftover windows, so a short's flying (or hike) clips actually cover the
+whole span instead of clustering wherever got explored first.
 """
 
 from __future__ import annotations
@@ -62,13 +66,48 @@ def pick_subclip(pool: list[Range], needed: float, used: UsedMap, key: str) -> R
     return clip
 
 
+def _clip_to_range(pool: list[Range], lo: float, hi: float) -> list[Range]:
+    out: list[Range] = []
+    for s, e in pool:
+        ns, ne = max(s, lo), min(e, hi)
+        if ne > ns:
+            out.append((ns, ne))
+    return out
+
+
 def pick_clips(pool: list[Range], count: int, needed: float, used: UsedMap, key: str) -> list[Range]:
+    """Pick `count` non-overlapping subclips spread across the pool's whole time span.
+
+    Splits the pool into `count` equal-width time buckets and draws one subclip per bucket
+    (falling back to the whole pool if a bucket has no free room left) instead of picking
+    uniformly among whatever windows remain after `used` subtracts already-picked clips — once
+    the pool fragments, that per-window choice (not weighted by window size) let picks cluster
+    together in whichever small region got explored first, instead of spreading across the full
+    span the way a "distributed over the flying time" short is supposed to read.
+    """
+    if count <= 0 or not pool:
+        return []
+    pool_start = min(s for s, _ in pool)
+    pool_end = max(e for _, e in pool)
+    span = pool_end - pool_start
+    if span <= 0:
+        return []
+    bucket = span / count
     clips: list[Range] = []
-    for _ in range(count):
-        c = pick_subclip(pool, needed, used, key)
-        if c is None:
-            break
-        clips.append(c)
+    for i in range(count):
+        b_start = pool_start + i * bucket
+        b_end = pool_start + (i + 1) * bucket
+        sub_pool = _clip_to_range(pool, b_start, b_end)
+        clip = pick_subclip(sub_pool, needed, used, key)
+        if clip is None:
+            logger.warning(
+                "pick_clips: bucket %d/%d [%.1f, %.1f) had no free room — falling back to the "
+                "whole pool, so this short's spread over [%.1f, %.1f) is degraded",
+                i + 1, count, b_start, b_end, pool_start, pool_end,
+            )
+            clip = pick_subclip(pool, needed, used, key)
+        if clip is not None:
+            clips.append(clip)
     clips.sort()  # chronological so the short reads as a coherent flight
     return clips
 

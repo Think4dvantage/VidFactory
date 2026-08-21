@@ -47,8 +47,9 @@ class FlightlogSection(BaseModel):
 class ShortsSection(BaseModel):
     # Caps chosen so a fully-loaded highlight short (hook + launch + flying*count + landing + CTA)
     # stays under ~30s: 6 + 4 + 3*3 + 4 + 3 = 26s.
-    clip_duration: float = 3.0          # length of each sampled flying clip
+    clip_duration: float = 3.0          # length of each sampled flying/hike clip
     flying_clip_count: int = 3
+    hike_clip_count: int = 2            # Hike & Fly only — sampled from the prepended hike segment
     cta_duration: float = 3.0
     hook_max: float = 6.0               # cap on the leading highlight clip
     launch_max: float = 4.0

@@ -102,6 +102,17 @@ def _encode_sped_hike(
     runner.encode(args, total_out_duration, progress_cb, cancel_event)
 
 
+def hike_output_duration(hike_files: list[str], speed_factor: float, runner: FFmpegRunner) -> float:
+    """Seconds the (optionally sped-up) hike segment occupies on the full-flight timeline.
+
+    Mirrors the speed-up math `concatenate()` uses when prepending it, so other callers (the
+    shorts builder needs the hike/flying boundary) don't have to re-derive the formula.
+    """
+    raw = sum(runner.get_video_info(f)[2] for f in hike_files)
+    needs_speed = abs(speed_factor - 1.0) > 1e-3
+    return (raw / speed_factor) if needs_speed else raw
+
+
 def concatenate(
     parts: list[str],
     output: str,

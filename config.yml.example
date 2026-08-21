@@ -33,6 +33,19 @@ music:
   music_volume: 0.35                # gain on music before mixing
   original_audio_volume: 1.0        # gain on original/clip audio
 
+shorts:
+  clip_duration: 3.0        # length of each sampled flying/hike clip, seconds
+  flying_clip_count: 3      # random flying clips per short, spread across the flying time
+  hike_clip_count: 2        # Hike & Fly only — clips sampled from the prepended hike segment
+  cta_duration: 3.0
+  hook_max: 6.0             # cap on the leading highlight clip
+  launch_max: 4.0
+  landing_max: 4.0
+  video_bitrate: "8M"
+  audio_bitrate: "128k"
+  cta_line1: "for more relaxed Paragliding"
+  cta_line2: "Like & Subscribe"
+
 flightlog:
   # [VF_FLIGHTLOG_URL] Base URL of the separate Flightlog service's integration API, e.g.
   # https://fl.lenti.cloud. Each user supplies their own API key on their /account page.
