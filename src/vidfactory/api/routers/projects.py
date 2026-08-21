@@ -80,6 +80,15 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
     project = projects.get_owned_project(db, project_id, user.id)
     if project is None:
         return Response(status_code=404)
+    shorts = projects.prune_missing_shorts(db, project)
+    # Summary/FullFlight+music never persisted which tracks they used, so their pasteable text
+    # comes from the sibling credits file a build writes. Shorts DO persist it (segments_used),
+    # so theirs is rebuilt straight from the DB — see core/music.build_credits_text.
+    short_credits = {
+        s.id: text
+        for s in shorts
+        if (text := music.build_credits_text(music.normalize_music_credits(s.segments_used.get("music"))))
+    }
     return templates.TemplateResponse(
         request,
         "project.html",
@@ -91,7 +100,10 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
             "music_defaults": get_config().music,
             "highlight_count": len(project.highlights),
             "make_short_count": sum(1 for h in project.highlights if h.make_short),
-            "shorts": sorted(project.shorts, key=lambda s: s.created_at, reverse=True),
+            "shorts": shorts,
+            "short_credits": short_credits,
+            "summary_credits": projects.read_credits_text(project.summary_file),
+            "fullmusic_credits": projects.read_credits_text(project.fullflight_music_file),
         },
     )
 
@@ -602,11 +614,17 @@ def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_
                     music_bed=bed, music_volume=mv, original_volume=ov,
                     progress_cb=scaled, cancel_event=job.cancel_event,
                 )
+                # Resolved once here (title/artist tags) and reused for both the sibling credits
+                # file and the DB record, so the project page never has to re-probe ffprobe just
+                # to show the pasteable text (see core/music.resolve_track_credits).
+                music_credits = music.resolve_track_credits(tracks, runner) if tracks else []
+                if music_credits:
+                    music.write_credits(music_credits, projects.credits_path_for(out))
                 db.add(Short(
                     project_id=project_id, output_file=res["output"], short_type=mode,
                     duration=res["duration"], source_highlight_id=hid, title=title,
                     segments_used={"hook": hook, "hike": hike_clips, "launch": launch, "flying": flying,
-                                   "landing": landing, "music": (tracks[0] if tracks else None)},
+                                   "landing": landing, "music": music_credits},
                 ))
                 db.commit()
                 if bed:
@@ -652,7 +670,7 @@ def _summary_target(project_id: int, owner_id: int, target_seconds: float, music
                 progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
             )
             if tracks:
-                music.write_credits(tracks, projects.credits_path_for(out), runner)
+                music.write_credits(music.resolve_track_credits(tracks, runner), projects.credits_path_for(out))
             project.summary_file = res["output"]
             db.commit()
             if bed:
@@ -683,7 +701,7 @@ def _fullmusic_target(project_id: int, owner_id: int, music_path: str, mv: float
                 audio_bitrate=cfg.encode.audio_bitrate,
                 progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
             )
-            music.write_credits(tracks, projects.credits_path_for(out), runner)
+            music.write_credits(music.resolve_track_credits(tracks, runner), projects.credits_path_for(out))
             project.fullflight_music_file = res["output"]
             db.commit()
             Path(bed).unlink(missing_ok=True)

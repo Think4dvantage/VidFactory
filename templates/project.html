@@ -123,6 +123,20 @@
   </select>
 {% endmacro %}
 
+{% macro credits_box(id, text) %}
+  {% if text %}
+  <div class="mt-2">
+    <div class="flex items-center justify-between">
+      <span class="text-xs text-slate-400">🎵 Music credits — paste into the video description</span>
+      <button type="button" data-copy-target="{{ id }}"
+              class="text-xs rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600">📋 Copy</button>
+    </div>
+    <textarea id="{{ id }}" readonly rows="3"
+              class="mt-1 w-full text-xs rounded bg-slate-900 border border-slate-600 px-2 py-1 text-slate-300">{{ text }}</textarea>
+  </div>
+  {% endif %}
+{% endmacro %}
+
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
   <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Summary ({{ highlight_count }} highlights marked)</h2>
   <form id="sum-form" class="flex flex-wrap items-end gap-3 text-sm">
@@ -138,6 +152,7 @@
   </form>
   <div id="sum-progress" class="mt-2 text-sm" hidden><div><span id="sum-stage"></span> — <span id="sum-pct">0</span>% <span id="sum-elapsed" class="text-slate-500"></span></div><progress id="sum-bar" max="100" value="0" class="w-full"></progress></div>
   <div id="sum-result" class="mt-2 text-sm text-slate-300">{% if project.summary_file %}✅ {{ project.summary_file }}{% endif %}</div>
+  {{ credits_box('sum-credits', summary_credits) }}
 </section>
 
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
@@ -153,6 +168,7 @@
   </form>
   <div id="fm-progress" class="mt-2 text-sm" hidden><div><span id="fm-stage"></span> — <span id="fm-pct">0</span>% <span id="fm-elapsed" class="text-slate-500"></span></div><progress id="fm-bar" max="100" value="0" class="w-full"></progress></div>
   <div id="fm-result" class="mt-2 text-sm text-slate-300">{% if project.fullflight_music_file %}✅ {{ project.fullflight_music_file }}{% endif %}</div>
+  {{ credits_box('fm-credits', fullmusic_credits) }}
 </section>
 
 <section class="rounded-lg border border-slate-700 bg-slate-800 p-4 mt-4">
@@ -178,10 +194,13 @@
   {% if shorts %}
   <div class="mt-3 text-sm divide-y divide-slate-700/60">
     {% for s in shorts %}
-    <div class="py-1 flex justify-between gap-2">
-      <span>{{ s.title or s.output_file.split('/')[-1] }}
-        <span class="text-slate-500">({{ s.short_type }}, {{ '%.1f'|format(s.duration or 0) }}s)</span></span>
-      <span class="text-slate-500 text-xs">{{ s.output_file.split('/')[-1] }}</span>
+    <div class="py-2">
+      <div class="flex justify-between gap-2">
+        <span>{{ s.title or s.output_file.split('/')[-1] }}
+          <span class="text-slate-500">({{ s.short_type }}, {{ '%.1f'|format(s.duration or 0) }}s)</span></span>
+        <span class="text-slate-500 text-xs">{{ s.output_file.split('/')[-1] }}</span>
+      </div>
+      {{ credits_box('sh-credits-' ~ s.id, short_credits.get(s.id)) }}
     </div>
     {% endfor %}
   </div>

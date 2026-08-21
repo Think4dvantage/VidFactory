@@ -23,6 +23,25 @@ window.VF.wireHikeFly = function (root) {
 document.addEventListener("DOMContentLoaded", () => window.VF.wireHikeFly(document));
 document.body.addEventListener("htmx:load", () => window.VF.wireHikeFly(document));
 
+// Generic "copy this textarea/element's text to the clipboard" button, delegated on the
+// document so it works on any page without per-page wiring (e.g. project.html's music-credits
+// boxes) — <button data-copy-target="some-id">.
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-copy-target]");
+  if (!btn) return;
+  const el = document.getElementById(btn.dataset.copyTarget);
+  if (!el) return;
+  const text = "value" in el ? el.value : el.textContent;
+  navigator.clipboard.writeText(text).then(
+    () => {
+      const original = btn.textContent;
+      btn.textContent = "✅ Copied";
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    },
+    (err) => console.error("[VF:app] clipboard copy failed", err),
+  );
+});
+
 window.VF.followJob = function (jobId, onUpdate) {
   console.log(`[VF:jobs] following job ${jobId}`);
   const es = new EventSource(`/events/${jobId}`);

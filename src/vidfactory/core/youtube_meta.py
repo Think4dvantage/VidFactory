@@ -5,6 +5,12 @@ that service is expected to derive chapters/titles/descriptions itself from this
 timestamps come straight from `Highlight` rows (ground truth). `segment_order` reuses
 `highlights.merge_overlaps()` to report the *content* order highlights would appear in a Summary
 build — see `SegmentOrderEntry` in `models/youtube.py` for why it is not a rendered-video timestamp.
+
+**M18:** also carries pasteable music-attribution text, so the external tool can drop it straight
+into a video description without re-deriving anything: each short's `credits` (resolved from its
+own `segments_used["music"]`, no I/O) plus top-level `summary_credits`/`fullflight_music_credits`
+(read from the sibling `_MusicCredits.txt` those two builds write — `None` if no music, or if the
+video predates M18 and hasn't been rebuilt since).
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from vidfactory.config import get_config
-from vidfactory.core import flightlog_client
+from vidfactory.core import flightlog_client, music, projects as projects_core
 from vidfactory.core.highlights import list_highlights, merge_overlaps
 from vidfactory.database.models import Project
 
@@ -96,6 +102,9 @@ def build_metadata(db: Session, project: Project) -> dict:
             "source_highlight_id": s.source_highlight_id,
             "source_highlight_name": highlight_names.get(s.source_highlight_id),
             "segments_used": s.segments_used,
+            "credits": music.build_credits_text(
+                music.normalize_music_credits(s.segments_used.get("music"))
+            ) or None,
         }
         for s in project.shorts
     ]
@@ -113,6 +122,8 @@ def build_metadata(db: Session, project: Project) -> dict:
         "highlights": highlights_out,
         "segment_order": segment_order,
         "shorts": shorts_out,
+        "summary_credits": projects_core.read_credits_text(project.summary_file),
+        "fullflight_music_credits": projects_core.read_credits_text(project.fullflight_music_file),
         "flight": flight,
         "flight_segments": flight_segments,
     }

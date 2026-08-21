@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from vidfactory.config import get_config
-from vidfactory.database.models import Hike, Project, SourcePart
+from vidfactory.database.models import Hike, Project, Short, SourcePart
+
+logger = logging.getLogger(__name__)
 
 
 def _project_query():
@@ -106,6 +109,28 @@ def remove_hike_source(db: Session, project: Project, index: int) -> None:
     db.commit()
 
 
+def prune_missing_shorts(db: Session, project: Project) -> list[Short]:
+    """Drop `Short` rows whose output file no longer exists on disk (e.g. deleted through the
+    file browser's delete feature) and return the ones that are still real, newest first — so
+    the project page never lists a short there's nothing left to play or download."""
+    kept: list[Short] = []
+    removed = 0
+    for short in project.shorts:
+        if short.output_file and Path(short.output_file).exists():
+            kept.append(short)
+        else:
+            logger.info(
+                "[VF:projects] pruning short id=%s project=%s (missing file: %s)",
+                short.id, project.id, short.output_file,
+            )
+            db.delete(short)
+            removed += 1
+    if removed:
+        db.commit()
+    kept.sort(key=lambda s: s.created_at, reverse=True)
+    return kept
+
+
 def _stem(project: Project) -> str:
     # Project id is included because output roots are shared across all users' files — two
     # pilots flying the same day would otherwise overwrite each other's outputs.
@@ -136,3 +161,21 @@ def fullmusic_output_path(project: Project) -> str:
 def credits_path_for(video_output: str) -> str:
     p = Path(video_output)
     return str(p.with_name(p.stem + "_MusicCredits.txt"))
+
+
+def read_credits_text(video_output: str | None) -> str | None:
+    """The sibling `_MusicCredits.txt` for a Summary/FullFlight+music build, for display on the
+    project page — `None` if there's no music, or the video predates this feature and was never
+    rebuilt since. (Shorts don't need this: their credits are resolved once at build time and
+    stored on `Short.segments_used["music"]`, so the project page renders them from the DB
+    without touching the filesystem — see `core/music.build_credits_text`.)"""
+    if not video_output:
+        return None
+    path = Path(credits_path_for(video_output))
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("[VF:projects] could not read credits file: %s", path)
+        return None

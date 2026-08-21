@@ -137,6 +137,17 @@ def prepare_music_bed(
     return bed, sel.tracks
 
 
+# The music library ships with resources/StreamBeats Sync_Use License.pdf (Senpai Music Group,
+# LLC's Synchronization and Master Use License) — clause 7 asks users to make "reasonable
+# efforts" to credit the author's name and each track's title wherever the music is used. This
+# is the library-level line for that; per-track author credit comes from each file's own
+# artist/title tags (resolve_track_credits below), never asserted for tracks we can't attribute.
+LICENSE_NOTICE = (
+    "This music library is licensed under the Synchronization and Master Use License from "
+    "Senpai Music Group, LLC."
+)
+
+
 def _track_meta(runner: FFmpegRunner, file: str) -> tuple[str | None, str | None]:
     try:
         out = subprocess.run(
@@ -150,12 +161,52 @@ def _track_meta(runner: FFmpegRunner, file: str) -> tuple[str | None, str | None
         return None, None
 
 
-def write_credits(tracks: list[str], out_path: str, runner: FFmpegRunner) -> None:
-    lines = ["Music Credits", "=============", ""]
+def resolve_track_credits(tracks: list[str], runner: FFmpegRunner) -> list[dict]:
+    """Probe each track's embedded title/artist tags once, at build time, so a later render
+    (e.g. the project page's credits box) never has to shell out to ffprobe just to display
+    text it already resolved — the result is stored verbatim on `Short.segments_used["music"]`."""
+    out = []
     for t in tracks:
         title, artist = _track_meta(runner, t)
-        name = title or Path(t).stem
-        lines.append(f"- {name}" + (f" — {artist}" if artist else ""))
-    lines.append("")
-    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
+        out.append({"file": t, "title": title or Path(t).stem, "artist": artist})
+    return out
+
+
+def normalize_music_credits(value) -> list[dict]:
+    """Coerce `Short.segments_used["music"]` to the current shape (list of
+    `{file, title, artist}` dicts) regardless of which shape a given row was written with —
+    older rows stored a single track path string (or `None`) before this key held resolved
+    credits."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [{"file": value, "title": Path(value).stem, "artist": None}]
+    if isinstance(value, list):
+        return [
+            v if isinstance(v, dict) else {"file": v, "title": Path(v).stem, "artist": None}
+            for v in value
+        ]
+    return []
+
+
+def build_credits_text(credits: list[dict]) -> str:
+    """Ready-to-paste attribution block for a video description. No filesystem paths, no legal
+    boilerplate beyond the one line the license actually asks for — just what a viewer/YouTube
+    needs: which tracks, whose they are (when known), and the library's license."""
+    if not credits:
+        return ""
+    lines = ["Music:"]
+    for c in credits:
+        title = c.get("title") or Path(c.get("file") or "").stem
+        artist = c.get("artist")
+        lines.append(f'- "{title}"' + (f" by {artist}" if artist else ""))
+    lines += ["", LICENSE_NOTICE]
+    return "\n".join(lines)
+
+
+def write_credits(credits: list[dict], out_path: str) -> None:
+    text = build_credits_text(credits)
+    if not text:
+        return
+    Path(out_path).write_text(text, encoding="utf-8")
     logger.info("Wrote music credits: %s", out_path)

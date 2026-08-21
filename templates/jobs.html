@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}VidFactory — Job Queue{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-xl font-semibold">Job Queue</h1>
+  <span class="text-xs text-slate-400">updates automatically</span>
+</div>
+
+<div class="rounded-lg border border-slate-700 bg-slate-800 p-2 overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-xs uppercase tracking-wide text-slate-400">
+        <th class="px-2 py-1">Project</th>
+        <th class="px-2 py-1">Build</th>
+        <th class="px-2 py-1">Status</th>
+        <th class="px-2 py-1">Progress</th>
+        <th class="px-2 py-1">Elapsed</th>
+        <th class="px-2 py-1"></th>
+      </tr>
+    </thead>
+    <tbody id="jobs-body">
+      <tr><td colspan="6" class="px-2 py-3 text-slate-400">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script src="/static/jobs.js" defer></script>
+{% endblock %}

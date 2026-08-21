@@ -41,3 +41,61 @@ def test_scan_durations_logs_on_cache_hit(tmp_path, caplog):
 
     assert len(durations) == 1
     assert any("Scanned" in r.message for r in caplog.records)
+
+
+def test_resolve_track_credits_uses_tags_and_falls_back_to_filename(monkeypatch):
+    def fake_track_meta(runner, file):
+        return {"a.mp3": ("Lights Up", "Harris Heller"), "b.mp3": (None, None)}[file]
+
+    monkeypatch.setattr(music, "_track_meta", fake_track_meta)
+
+    credits = music.resolve_track_credits(["a.mp3", "b.mp3"], _StubRunner())
+
+    assert credits == [
+        {"file": "a.mp3", "title": "Lights Up", "artist": "Harris Heller"},
+        {"file": "b.mp3", "title": "b", "artist": None},
+    ]
+
+
+def test_normalize_music_credits_handles_every_historical_shape():
+    assert music.normalize_music_credits(None) == []
+    assert music.normalize_music_credits("") == []
+    assert music.normalize_music_credits("old/track.mp3") == [
+        {"file": "old/track.mp3", "title": "track", "artist": None}
+    ]
+    assert music.normalize_music_credits(["a/one.mp3", "b/two.mp3"]) == [
+        {"file": "a/one.mp3", "title": "one", "artist": None},
+        {"file": "b/two.mp3", "title": "two", "artist": None},
+    ]
+    current = [{"file": "x.mp3", "title": "X", "artist": "Someone"}]
+    assert music.normalize_music_credits(current) == current
+
+
+def test_build_credits_text_empty_for_no_credits():
+    assert music.build_credits_text([]) == ""
+
+
+def test_build_credits_text_includes_title_artist_and_license_notice():
+    credits = [
+        {"file": "a.mp3", "title": "Lights Up", "artist": "Harris Heller"},
+        {"file": "b.mp3", "title": "b", "artist": None},
+    ]
+
+    text = music.build_credits_text(credits)
+
+    assert '- "Lights Up" by Harris Heller' in text
+    assert '- "b"' in text  # no dangling "by" for a track with no artist tag
+    assert music.LICENSE_NOTICE in text
+    assert "resources" not in text  # no filesystem path leaking into pasted text
+    assert "StreamBeats Sync_Use License.pdf" not in text
+
+
+def test_write_credits_writes_file_only_when_there_are_credits(tmp_path):
+    out_path = tmp_path / "Short_01_MusicCredits.txt"
+
+    music.write_credits([], str(out_path))
+    assert not out_path.exists()
+
+    music.write_credits([{"file": "a.mp3", "title": "A", "artist": "Artist"}], str(out_path))
+    assert out_path.exists()
+    assert '"A" by Artist' in out_path.read_text(encoding="utf-8")

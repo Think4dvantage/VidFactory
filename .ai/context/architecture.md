@@ -114,7 +114,21 @@ a tooltip (kind/alt-change/climb-rate), click near one to seek exactly to it.
 
 **Music** (`music.py`) — folder mode (shuffle to cover duration; durations cached by folder-path hash)
 or single-file mode (loop). `loudnorm` (EBU R128) then `amix` (`duration=first`, `normalize=0`) at a
-user music/original ratio. Writes a credits `.txt` listing every track used.
+user music/original ratio. **M18:** credits are now a pasteable attribution block, not a bare
+track list — `resolve_track_credits()` probes each track's `title`/`artist` tags once at build
+time (needed because the library ships under `resources/StreamBeats Sync_Use License.pdf`,
+Senpai Music Group LLC's Synchronization and Master Use License, whose clause 7 asks for
+"reasonable efforts" to credit the author's name + each track's title wherever the music is
+used); `build_credits_text()` formats that into `Music:\n- "title" by artist\n...` + one line
+naming the license covering the library (never asserted per-track — only what a file's own tags
+say); `write_credits()` writes it to the sibling `_MusicCredits.txt` next to Summary/FullMusic/
+each Short's output. Shorts additionally store the resolved list on
+`Short.segments_used["music"]` (previously just the first track's bare path) so
+`GET /projects/{id}` can render a copy-pasteable textarea per short straight from the DB, no
+filesystem/ffprobe touch on page render; `music.normalize_music_credits()` coerces the pre-M18
+single-string shape so shorts built before this change still show credits. Summary/FullMusic have
+no DB-backed track record, so their textarea is read back from the sibling file instead
+(`core/projects.read_credits_text()`) — `None` until the next rebuild if one was built before M18.
 
 ---
 
@@ -166,7 +180,12 @@ a checkbox (no bulk/recursive delete surface at all).
 > is no `flightlog` router anymore; those routes 404.
 
 **projects** — `POST /projects/new` (create+redirect; optional `date` form field, defaults to today) ·
-`GET /projects/{id}` page · `GET /projects/{id}/editor` page ·
+`GET /projects/{id}` page (**M16**: calls `core/projects.prune_missing_shorts()` before rendering —
+if a `Short.output_file` no longer exists on disk (deleted via the M14 file-browser delete, or by
+hand), that row is deleted from the DB and dropped from the list, not just hidden; logged at INFO.
+Same on-demand-`Path.exists()` pattern `fullflight_video`/`editor_page` already use for
+`preview_file`/`full_flight_file`, just with an actual delete since a `Short` is a disposable
+generation record, not a source asset) · `GET /projects/{id}/editor` page ·
 flight-type/`flightlog-id`/parts(upload,move,delete)/hike(`upload`,`remove`) mutations ·
 **source upload (M11, `core/chunked_upload.py`)** — no longer a single multipart request (a 30-min
 Traefik entrypoint `readTimeout` kills any request that takes longer, which any real flight video
@@ -193,9 +212,12 @@ builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summar
 `GET /api/projects/{id}/status`.
 
 **sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result,elapsed_seconds,
-queue_position}`) · `GET /api/jobs` · `POST /api/jobs/{id}/cancel`. All three scoped to the
-caller's own jobs (`core/jobs.Job.owner_id`, set when `registry.run()` is called) — a job that
-exists but belongs to someone else 404s, same as a project.
+queue_position}`) · `GET /api/jobs` · `POST /api/jobs/{id}/cancel` · `GET /jobs` (**M17**: the
+Job Queue page — every job for the caller, any project/status, table + cancel button;
+`static/jobs.js` polls `GET /api/jobs` every 2s and renders client-side, no HTMX/new backend
+surface, same JSON-polling pattern `project.html`'s own build-progress code already uses). All
+job-touching routes scoped to the caller's own jobs (`core/jobs.Job.owner_id`, set when
+`registry.run()` is called) — a job that exists but belongs to someone else 404s, same as a project.
 
 **Job queue (M13, `core/jobs.py`):** all builds now go through a single global FIFO queue — one
 worker thread, so exactly one FFmpeg job runs at a time across the **whole app, every user, every
@@ -225,7 +247,12 @@ queued back-to-back and redoing the same work, which the FIFO queue alone wouldn
 (full-flight timestamps, ground truth) + `segment_order` (content order/cumulative duration from
 `highlights.merge_overlaps()` over `use_in_summary` highlights — **not** a rendered Summary.mp4
 timestamp, see the docstring in `models/youtube.py`) + every `Short` with `segments_used` and its
-resolved `source_highlight_name` (null for random-pool shorts). No `metadata.json` file is written —
+resolved `source_highlight_name` (null for random-pool shorts). **M19:** also each `Short.credits`
+(pasteable music-attribution text, resolved from its own `segments_used["music"]`, no I/O) plus
+top-level `summary_credits`/`fullflight_music_credits` (read from the sibling `_MusicCredits.txt`
+those two builds write — no DB-backed track list exists for them) — the API surface an external
+tool actually needs to paste credits into a video description, same data M18 put on the project
+page's UI. No `metadata.json` file is written —
 API-only per the live-pull model an external YouTube-management container uses; that container derives
 actual chapters/titles/descriptions itself from this raw data. **M6:** also `flight` +
 `flight_segments` (`models/flightlog.py`, mirrors Flightlog's contract verbatim) — best-effort;

@@ -47,6 +47,9 @@ class ShortMeta(BaseModel):
     source_highlight_id: int | None
     source_highlight_name: str | None
     segments_used: dict
+    # Pasteable attribution text (core/music.build_credits_text), resolved from
+    # segments_used["music"] — None when the short has no music. See M18.
+    credits: str | None = None
 
 
 class ProjectYoutubeMetadata(BaseModel):
@@ -60,6 +63,12 @@ class ProjectYoutubeMetadata(BaseModel):
     highlights: list[HighlightMeta]
     segment_order: list[SegmentOrderEntry]
     shorts: list[ShortMeta]
+    # Pasteable attribution text for Summary/FullFlight+music, read back from the sibling
+    # _MusicCredits.txt a build writes (core/projects.read_credits_text) — unlike shorts, these
+    # builds never persisted which tracks they used, so there's no DB-backed fallback; None if no
+    # music was used, or the video predates M18 and hasn't been rebuilt since.
+    summary_credits: str | None = None
+    fullflight_music_credits: str | None = None
     # Best-effort Flightlog enrichment — None whenever external_flight_id/the owner's API key
     # isn't set, or the Flightlog call fails. Never blocks this endpoint (see core/youtube_meta.py).
     flight: FlightMetadataOut | None = None

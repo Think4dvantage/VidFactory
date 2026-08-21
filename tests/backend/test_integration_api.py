@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from vidfactory.core.auth import generate_api_key, hash_password
-from vidfactory.database.models import Project, User
+from vidfactory.database.models import Project, Short, User
 
 
 def test_no_key_401s(client):
@@ -44,6 +44,29 @@ def test_valid_key_gets_youtube_metadata(client, db_session, user):
 
     assert resp.status_code == 200
     assert resp.json()["project_id"] == project.id
+
+
+def test_valid_key_gets_pasteable_music_credits(client, db_session, user):
+    """The exact path an external YouTube-management tool uses to pull description text — no
+    browser session, API key only. See M18/M19: credits are exposed here, not just on the UI."""
+    key = generate_api_key(db_session, user)
+    project = Project(owner_id=user.id, flight_type="normal_flight", full_flight_file="ff.mp4")
+    db_session.add(project)
+    db_session.commit()
+    db_session.add(Short(
+        project_id=project.id, output_file="short1.mp4", short_type="highlight",
+        segments_used={"music": [{"file": "a.mp3", "title": "Lights Up", "artist": "Harris Heller"}]},
+    ))
+    db_session.commit()
+
+    resp = client.get(
+        f"/api/integration/v1/projects/{project.id}/youtube-metadata",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+    assert resp.status_code == 200
+    credits = resp.json()["shorts"][0]["credits"]
+    assert '"Lights Up" by Harris Heller' in credits
 
 
 def test_key_cannot_see_another_users_project(client, db_session, user):
