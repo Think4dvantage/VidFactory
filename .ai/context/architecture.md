@@ -121,6 +121,22 @@ either user can browse/download the other's finished videos — acceptable for n
 in exposure from the music-only original, worth revisiting if a less-trusted user is ever added.
 **M7:** `videos` is no longer a browsable root at all (see Storage & mounts).
 
+**M14: multiselect + delete.** `POST /api/browse/{root}/delete` (form-encoded, repeated `paths=`
++ current `path=`) deletes one or more files and re-renders `partials/listing.html` for that
+directory, reporting any per-item failures inline instead of failing the whole request
+(`core/filebrowser.delete()` — single-file only, no recursive directory delete). Gated on
+`cfg.writable_roots()` (same set M2/M3/M4 already write to), so `music` stays delete-proof exactly
+like it stays the one root the app never writes to — the listing UI only renders checkboxes/🗑
+buttons for roots in that set. `templates/partials/listing.html` wraps the table in a `<form>`:
+each file row gets a `paths` checkbox, a per-row delete button (plain `fetch()` from
+`static/browser.js`, not `hx-vals`, so a filename containing a literal `"` can't break JSON
+embedded in an HTML attribute), and a toolbar (select-all, "download selected", "delete selected"
+gated the same way). "Delete selected" is a normal htmx form post (checked boxes serialize via the
+enclosing `<form>`); "download selected" has no server counterpart — `static/browser.js` just
+fires the existing single-file `<a download>` pattern once per selected item, staggered ~400ms
+apart so browsers don't block/drop near-simultaneous programmatic downloads. Directories never get
+a checkbox (no bulk/recursive delete surface at all).
+
 > Flight-log (`/flightlog*`) has been removed — see Core concept above and `features.md` M1a. There
 > is no `flightlog` router anymore; those routes 404.
 

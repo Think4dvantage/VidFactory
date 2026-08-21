@@ -1,4 +1,5 @@
 {% set root = listing.root %}
+{% set can_write = root in writable_roots %}
 <div>
   <div class="flex items-center justify-between px-2 py-1 text-xs text-slate-400">
     <span>/{{ listing.rel }}</span>
@@ -9,38 +10,68 @@
     {% endif %}
   </div>
 
+  {% if delete_errors %}
+  <p class="px-2 py-1 text-xs text-amber-400">Could not delete {{ delete_errors | length }} item(s): {{ delete_errors | join('; ') }}</p>
+  {% endif %}
+
   {% if not listing.exists %}
     <p class="p-3 text-sm text-amber-400">Path does not exist on this mount.</p>
   {% else %}
-  <table class="w-full text-sm">
-    <tbody>
-      {% for e in listing.entries %}
-      <tr class="border-t border-slate-700/60 hover:bg-slate-700/40">
-        <td class="py-1 px-2 w-6">
-          {% if e.kind == 'dir' %}📁{% elif e.kind == 'video' %}🎬{% elif e.kind == 'audio' %}🎵{% elif e.kind == 'image' %}🖼{% else %}📄{% endif %}
-        </td>
-        <td class="py-1 px-2">
-          {% if e.kind == 'dir' %}
-          <button class="text-sky-300 hover:underline"
-                  hx-get="/api/browse/{{ root }}?path={{ e.rel | urlencode }}" hx-target="#listing">{{ e.name }}</button>
-          {% else %}
-          <span>{{ e.name }}</span>
-          {% endif %}
-        </td>
-        <td class="py-1 px-2 text-right text-slate-400">{% if e.kind != 'dir' %}{{ e.size | filesizeformat }}{% endif %}</td>
-        <td class="py-1 px-2 text-right text-slate-500 text-xs">{{ e.mtime | ts }}</td>
-        <td class="py-1 px-2 text-right">
-          {% if e.kind != 'dir' %}
-          <a href="/api/download/{{ root }}?path={{ e.rel | urlencode }}" download
-             class="text-xs rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600 text-sky-300">⬇ download</a>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-      {% if not listing.entries %}
-      <tr><td colspan="5" class="p-3 text-slate-400">Empty folder.</td></tr>
+  <form data-root="{{ root }}" data-path="{{ listing.rel }}">
+    <input type="hidden" name="path" value="{{ listing.rel }}">
+    <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-400">
+      <label class="flex items-center gap-1">
+        <input type="checkbox" data-select-all> select all
+      </label>
+      <span data-selected-count>0 selected</span>
+      <button type="button" data-action="download-selected" disabled
+              class="rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600 text-sky-300 disabled:opacity-40 disabled:cursor-not-allowed">⬇ download selected</button>
+      {% if can_write %}
+      <button type="button" data-action="delete-selected" disabled
+              hx-post="/api/browse/{{ root }}/delete" hx-target="#listing" hx-swap="innerHTML"
+              hx-confirm="Delete the selected files? This cannot be undone."
+              class="rounded bg-red-900 px-2 py-0.5 hover:bg-red-800 text-red-200 disabled:opacity-40 disabled:cursor-not-allowed">🗑 delete selected</button>
       {% endif %}
-    </tbody>
-  </table>
+    </div>
+    <table class="w-full text-sm">
+      <tbody>
+        {% for e in listing.entries %}
+        <tr class="border-t border-slate-700/60 hover:bg-slate-700/40">
+          <td class="py-1 px-2 w-6">
+            {% if e.kind != 'dir' %}
+            <input type="checkbox" name="paths" value="{{ e.rel }}" data-select-item>
+            {% endif %}
+          </td>
+          <td class="py-1 px-2 w-6">
+            {% if e.kind == 'dir' %}📁{% elif e.kind == 'video' %}🎬{% elif e.kind == 'audio' %}🎵{% elif e.kind == 'image' %}🖼{% else %}📄{% endif %}
+          </td>
+          <td class="py-1 px-2">
+            {% if e.kind == 'dir' %}
+            <button type="button" class="text-sky-300 hover:underline"
+                    hx-get="/api/browse/{{ root }}?path={{ e.rel | urlencode }}" hx-target="#listing">{{ e.name }}</button>
+            {% else %}
+            <span>{{ e.name }}</span>
+            {% endif %}
+          </td>
+          <td class="py-1 px-2 text-right text-slate-400">{% if e.kind != 'dir' %}{{ e.size | filesizeformat }}{% endif %}</td>
+          <td class="py-1 px-2 text-right text-slate-500 text-xs">{{ e.mtime | ts }}</td>
+          <td class="py-1 px-2 text-right whitespace-nowrap">
+            {% if e.kind != 'dir' %}
+            <a href="/api/download/{{ root }}?path={{ e.rel | urlencode }}" download
+               class="text-xs rounded bg-slate-700 px-2 py-0.5 hover:bg-slate-600 text-sky-300">⬇</a>
+            {% if can_write %}
+            <button type="button" data-action="delete-one" data-rel="{{ e.rel }}" data-name="{{ e.name }}"
+                    class="text-xs rounded bg-red-900 px-2 py-0.5 hover:bg-red-800 text-red-200">🗑</button>
+            {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not listing.entries %}
+        <tr><td colspan="5" class="p-3 text-slate-400">Empty folder.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </form>
   {% endif %}
 </div>

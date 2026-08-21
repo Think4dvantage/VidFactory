@@ -76,6 +76,21 @@ def list_dir(root_name: str, rel: str = "") -> dict:
     return {"root": root_name, "rel": rel, "exists": True, "entries": entries}
 
 
+def delete(root_name: str, rel: str) -> None:
+    """Delete a single file under a writable root.
+
+    Raises `PathNotAllowed` if the root isn't writable, `rel` escapes the root, or the target
+    isn't an existing file (no recursive directory deletion via the browser).
+    """
+    if root_name not in get_config().writable_roots():
+        raise PathNotAllowed(f"Root '{root_name}' is not writable")
+    target = resolve(root_name, rel)
+    if not target.is_file():
+        raise PathNotAllowed(f"Not a file: {rel}")
+    target.unlink()
+    logger.info("[VF:browser] deleted root=%s path=%s", root_name, rel)
+
+
 def check_mounts() -> dict[str, str]:
     """name -> 'ok' | 'missing' | 'not writable'."""
     cfg = get_config()

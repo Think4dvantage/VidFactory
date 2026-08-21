@@ -34,7 +34,42 @@ def browse_listing(request: Request, root: str, path: str = ""):
             status_code=400,
             content={"error": {"code": "PATH_NOT_ALLOWED", "message": str(exc)}},
         )
-    return templates.TemplateResponse(request, "partials/listing.html", {"listing": listing})
+    return templates.TemplateResponse(
+        request,
+        "partials/listing.html",
+        {"listing": listing, "writable_roots": get_config().writable_roots()},
+    )
+
+
+@router.post("/api/browse/{root}/delete", include_in_schema=False)
+async def delete_entries(request: Request, root: str):
+    form = await request.form()
+    path = str(form.get("path", ""))
+    paths = [p for p in form.getlist("paths") if p]
+    deleted, errors = 0, []
+    for rel in paths:
+        try:
+            filebrowser.delete(root, str(rel))
+            deleted += 1
+        except filebrowser.PathNotAllowed as exc:
+            errors.append(str(exc))
+    logger.info(
+        "[VF:browser] delete request root=%s path=%s requested=%d deleted=%d errors=%d",
+        root,
+        path,
+        len(paths),
+        deleted,
+        len(errors),
+    )
+    try:
+        listing = filebrowser.list_dir(root, path)
+    except filebrowser.PathNotAllowed:
+        listing = filebrowser.list_dir(root, "")
+    return templates.TemplateResponse(
+        request,
+        "partials/listing.html",
+        {"listing": listing, "writable_roots": get_config().writable_roots(), "delete_errors": errors},
+    )
 
 
 @router.get("/api/download/{root}")
