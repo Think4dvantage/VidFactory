@@ -106,7 +106,8 @@ Every service must expose a `GET /health` endpoint. It must:
     "sqlite": "ok",
     "mounts": { "music": "ok", "output_fullflights": "ok", "output_summaries": "ok", "output_shorts": "ok", "archive": "ok" },
     "encoder": "h264_nvenc",
-    "jobs_active": 1
+    "jobs_active": 1,
+    "jobs_queued": 2
   }
 }
 ```

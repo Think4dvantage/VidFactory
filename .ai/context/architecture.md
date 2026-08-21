@@ -151,10 +151,32 @@ never errors, always 200 (see Core concept / Storage & mounts style best-effort 
 builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/build,shorts/build}` ·
 `GET /api/projects/{id}/status`.
 
-**sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result}`) ·
-`GET /api/jobs` · `POST /api/jobs/{id}/cancel`. All three scoped to the caller's own jobs
-(`core/jobs.Job.owner_id`, set when `registry.run()` is called) — a job that exists but belongs to
-someone else 404s, same as a project.
+**sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result,elapsed_seconds,
+queue_position}`) · `GET /api/jobs` · `POST /api/jobs/{id}/cancel`. All three scoped to the
+caller's own jobs (`core/jobs.Job.owner_id`, set when `registry.run()` is called) — a job that
+exists but belongs to someone else 404s, same as a project.
+
+**Job queue (M13, `core/jobs.py`):** all builds now go through a single global FIFO queue — one
+worker thread, so exactly one FFmpeg job runs at a time across the **whole app, every user, every
+project** (not per-project or per-user). `registry.run()` used to spawn a dedicated thread per job
+that started immediately; it now enqueues and returns, and the job sits `pending` until the one
+worker thread reaches it. Rationale: the host has a single GPU encoder and is already
+CPU-contended by other unrelated services on `sdh`, so builds racing each other just makes all of
+them slower — this lets someone queue up Summary + Full-flight-with-music + Shorts in one go and
+walk away, executed one at a time in submission order. `registry.position_in_queue(job_id)` (0 =
+running/next-up) is merged into every job payload as `queue_position`. `Job.started_at`/
+`finished_at` (unset while queued) back `elapsed_seconds` in `public()` — live elapsed while
+running, final duration once terminal — surfaced in the editor's progress UI (`(Nm Ns)` next to
+the percentage, "— took Nm Ns" on completion) since a queued job showing bare "pending" at 0% for
+up to an hour is exactly the ambiguous state that led to the double-build corruption `v0.4.6`
+fixed — don't recreate the failure mode you just fixed. Cancelling a still-*queued* job (`POST
+/api/jobs/{id}/cancel`) marks it `cancelled` and the worker skips it without ever invoking its
+target — cancelling a *running* one relies on `ffmpeg_runner.encode()` checking `cancel_event` on
+every stderr line and `proc.terminate()`-ing, which only fires if ffmpeg is still emitting output;
+a true hang with no stderr output would block every job queued behind it until a container
+restart, since there is no other escape hatch. `find_active()` (the `v0.4.6` same-kind-same-project
+conflict guard) still applies on top of the queue — it stops two identical builds from being
+queued back-to-back and redoing the same work, which the FIFO queue alone wouldn't prevent.
 
 **youtube** (M5a, `core/youtube_meta.py`) — `GET /api/projects/{id}/youtube-metadata`: read-only,
 `response_model`-typed (visible in `/docs`, unlike the editor's internal JSON endpoints), 404 via the

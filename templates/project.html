@@ -35,7 +35,7 @@
     </div>
     <button id="build-btn" class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1 text-sm">▶ Build Full Flight</button>
     <div id="build-progress" class="mt-2 text-sm" hidden>
-      <div class="text-slate-300"><span id="b-stage"></span> — <span id="b-pct">0</span>% <span id="b-speed" class="text-slate-500"></span></div>
+      <div class="text-slate-300"><span id="b-stage"></span> — <span id="b-pct">0</span>% <span id="b-speed" class="text-slate-500"></span> <span id="b-elapsed" class="text-slate-500"></span></div>
       <progress id="b-bar" max="100" value="0" class="w-full"></progress>
     </div>
     <div id="build-result" class="mt-2 text-sm text-slate-300">
@@ -136,7 +136,7 @@
     <button type="button" data-build="/api/projects/{{ project.id }}/summary/build" data-form="sum-form" data-prefix="sum"
             class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1">▶ Build Summary</button>
   </form>
-  <div id="sum-progress" class="mt-2 text-sm" hidden><div><span id="sum-stage"></span> — <span id="sum-pct">0</span>%</div><progress id="sum-bar" max="100" value="0" class="w-full"></progress></div>
+  <div id="sum-progress" class="mt-2 text-sm" hidden><div><span id="sum-stage"></span> — <span id="sum-pct">0</span>% <span id="sum-elapsed" class="text-slate-500"></span></div><progress id="sum-bar" max="100" value="0" class="w-full"></progress></div>
   <div id="sum-result" class="mt-2 text-sm text-slate-300">{% if project.summary_file %}✅ {{ project.summary_file }}{% endif %}</div>
 </section>
 
@@ -151,7 +151,7 @@
     <button type="button" data-build="/api/projects/{{ project.id }}/fullmusic/build" data-form="fm-form" data-prefix="fm"
             class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1">▶ Build Full Flight + Music</button>
   </form>
-  <div id="fm-progress" class="mt-2 text-sm" hidden><div><span id="fm-stage"></span> — <span id="fm-pct">0</span>%</div><progress id="fm-bar" max="100" value="0" class="w-full"></progress></div>
+  <div id="fm-progress" class="mt-2 text-sm" hidden><div><span id="fm-stage"></span> — <span id="fm-pct">0</span>% <span id="fm-elapsed" class="text-slate-500"></span></div><progress id="fm-bar" max="100" value="0" class="w-full"></progress></div>
   <div id="fm-result" class="mt-2 text-sm text-slate-300">{% if project.fullflight_music_file %}✅ {{ project.fullflight_music_file }}{% endif %}</div>
 </section>
 
@@ -173,7 +173,7 @@
     <button type="button" data-build="/api/projects/{{ project.id }}/shorts/build" data-form="sh-form" data-prefix="sh"
             class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1">▶ Build Shorts</button>
   </form>
-  <div id="sh-progress" class="mt-2 text-sm" hidden><div><span id="sh-stage"></span> — <span id="sh-pct">0</span>%</div><progress id="sh-bar" max="100" value="0" class="w-full"></progress></div>
+  <div id="sh-progress" class="mt-2 text-sm" hidden><div><span id="sh-stage"></span> — <span id="sh-pct">0</span>% <span id="sh-elapsed" class="text-slate-500"></span></div><progress id="sh-bar" max="100" value="0" class="w-full"></progress></div>
   <div id="sh-result" class="mt-2 text-sm text-slate-300"></div>
   {% if shorts %}
   <div class="mt-3 text-sm divide-y divide-slate-700/60">
@@ -300,15 +300,35 @@ document.querySelectorAll('form[data-upload]').forEach((form) => {
   });
 });
 
+// Jobs run through a single global queue (see core/jobs.py) -- one FFmpeg job at a time across
+// the whole app, so a submitted build often sits as "pending" for a while before it starts.
+function formatElapsed(seconds) {
+  if (seconds == null) return '';
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function stageLabel(d) {
+  if (d.status === 'pending') {
+    return d.queue_position > 0 ? `queued — ${d.queue_position} ahead` : 'queued — next up';
+  }
+  return d.stage || d.status;
+}
+
 // Generic build runner for the summary / full-music / shorts buttons (form -> job -> SSE).
 function followGenericBuild(pfx, btn, jobId) {
   document.getElementById(pfx + '-progress').hidden = false;
   btn.disabled = true;
   window.VF.followJob(jobId, (d) => {
-    document.getElementById(pfx + '-stage').textContent = d.stage || d.status;
+    document.getElementById(pfx + '-stage').textContent = stageLabel(d);
     document.getElementById(pfx + '-pct').textContent = d.percent;
     document.getElementById(pfx + '-bar').value = d.percent;
-    if (d.status === 'done') { document.getElementById(pfx + '-pct').textContent = '100'; document.getElementById(pfx + '-bar').value = 100; document.getElementById(pfx + '-result').textContent = '✅ ' + (d.result || ''); btn.disabled = false; }
+    const elapsedEl = document.getElementById(pfx + '-elapsed');
+    if (elapsedEl) elapsedEl.textContent = d.elapsed_seconds != null ? `(${formatElapsed(d.elapsed_seconds)})` : '';
+    if (d.status === 'done') { document.getElementById(pfx + '-pct').textContent = '100'; document.getElementById(pfx + '-bar').value = 100; document.getElementById(pfx + '-result').textContent = '✅ ' + (d.result || '') + ` — took ${formatElapsed(d.elapsed_seconds)}`; btn.disabled = false; }
     if (d.status === 'error') { document.getElementById(pfx + '-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
   });
 }
@@ -337,14 +357,15 @@ function followFullFlightBuild(btn, jobId) {
   document.getElementById('build-progress').hidden = false;
   btn.disabled = true;
   window.VF.followJob(jobId, (d) => {
-    document.getElementById('b-stage').textContent = d.stage || d.status;
+    document.getElementById('b-stage').textContent = stageLabel(d);
     document.getElementById('b-pct').textContent = d.percent;
     document.getElementById('b-speed').textContent = d.speed || '';
     document.getElementById('b-bar').value = d.percent;
+    document.getElementById('b-elapsed').textContent = d.elapsed_seconds != null ? `(${formatElapsed(d.elapsed_seconds)})` : '';
     if (d.status === 'done') {
       document.getElementById('b-pct').textContent = '100';
       document.getElementById('b-bar').value = 100;
-      document.getElementById('build-result').textContent = '✅ ' + (d.result || '');
+      document.getElementById('build-result').textContent = '✅ ' + (d.result || '') + ` — took ${formatElapsed(d.elapsed_seconds)}`;
       btn.disabled = false;
     }
     if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }

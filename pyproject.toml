@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "vidfactory"
-version = "0.4.7"
+version = "0.4.8"
 description = "Paragliding video pipeline (concat → summary → shorts → YouTube metadata)"
 authors = ["Raphael Eymann <r+claude@eymanns.ch>"]
 packages = [{include = "vidfactory", from = "src"}]

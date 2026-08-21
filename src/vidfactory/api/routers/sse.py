@@ -17,10 +17,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _public_with_queue_position(job) -> dict:
+    return {**job.public(), "queue_position": registry.position_in_queue(job.id)}
+
+
 @router.get("/api/jobs", include_in_schema=False)
 def list_jobs(user: User = Depends(require_user)):
     jobs = registry.list(user.id)
-    return {"data": [j.public() for j in jobs], "total": len(jobs)}
+    return {"data": [_public_with_queue_position(j) for j in jobs], "total": len(jobs)}
 
 
 @router.post("/api/jobs/{job_id}/cancel", include_in_schema=False)
@@ -41,7 +45,7 @@ async def job_events(job_id: str, user: User = Depends(require_user)):
             if job is None:
                 yield {"event": "error", "data": json.dumps({"message": "unknown job"})}
                 return
-            yield {"event": "progress", "data": json.dumps(job.public())}
+            yield {"event": "progress", "data": json.dumps(_public_with_queue_position(job))}
             if job.is_terminal:
                 return
             await asyncio.sleep(0.5)

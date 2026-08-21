@@ -107,6 +107,7 @@ def health():
     checks["mounts"] = mounts
     checks["encoder"] = getattr(app.state, "encoder", "unknown")
     checks["jobs_active"] = registry.active_count()
+    checks["jobs_queued"] = registry.queued_count()
 
     # Liveness vs readiness: the container is "up" if the process + DB are serving (the flight
     # log works off SQLite alone). Missing NAS mounts are reported as "degraded" but must NOT mark
