@@ -43,7 +43,9 @@ The user does not write code manually. All code changes go through AI. This mean
 
 - **No public cloud** (AWS, GCP, Azure, etc.) — ever, for private projects
 - **Design cloud-native** — 12-factor apps, stateless services, environment-based config, health endpoints, container-first
-- **Run on local Docker cluster** — Docker Compose, Traefik reverse proxy, homelab at `lg4.ch`
+- **Run on local Docker cluster** — Docker Compose, Traefik reverse proxy, homelab at `sdh.lol`
+  (migrated from the old `lg4.ch`/`xpsex` host after a 2026 move — confirmed dead during VidFactory's
+  M9–M11 investigation; SSH alias `sdh`, compose projects under `/opt/sdh.lol/compose/`)
 - **IaC always** — every service must be deployable and reproducible via code; no manual server state
 - **Pipeline deployment** — all services should be deployable through CI/CD pipelines (GitHub Actions on self-hosted runner)
 - **Operability is goal #1** — prefer boring, observable, easy-to-restart over clever

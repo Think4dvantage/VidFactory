@@ -337,9 +337,15 @@ before, just a new host). Confirmed via `docker inspect`/`docker logs`/`curl :80
   `music_path` value, as a second line of defense against this class of bug being silent.
   **Still unverified**: a real Flightlog API call.
 
-Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.3`; `sdh` is running `0.4.3` (M9
-upload fix + M10 GPU fix + M11 chunked upload all live) as of the 2026-08-20 recheck above. See
-`features.md` "Host migration" roadmap item.
+**2026-08-21 recheck: `sdh` is on `v0.4.8`**, confirmed via `/health` (`"version":"0.4.8"`,
+`jobs_queued` present alongside `jobs_active` — that field only exists from M13 on, so its
+presence alone confirms the image is current). M9 through M13 are all live: upload fix, GPU fix,
+chunked upload, the `FullFlight_withMusic` output-path fix, the folder-recursion + cache-hit music
+fixes, the same-kind-same-project build conflict guard, the public API-key integration contract,
+and the global FFmpeg job queue. Latest published image: `ghcr.io/think4dvantage/vidfactory:0.4.8`.
+See `features.md` "Host migration" roadmap item — still open: a real Flightlog API call, and the
+external YouTube-management repo actually calling `/api/integration/v1` (built and locally tested,
+never yet exercised by that repo).
 
 ### Healthcheck
 `python:3.11-slim` has no `curl`; use Python stdlib:
