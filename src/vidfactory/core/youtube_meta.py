@@ -116,6 +116,7 @@ def build_metadata(db: Session, project: Project) -> dict:
         "date": project.date,
         "flight_type": project.flight_type,
         "external_flight_id": project.external_flight_id,
+        "pilot_name": project.pilot_name,
         "full_flight_file": project.full_flight_file,
         "summary_file": project.summary_file,
         "fullflight_music_file": project.fullflight_music_file,

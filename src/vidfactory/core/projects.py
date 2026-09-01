@@ -44,8 +44,15 @@ def list_projects(db: Session, owner_id: int) -> list[Project]:
     )
 
 
-def create_project(db: Session, owner_id: int, date: datetime.date | None = None) -> Project:
-    project = Project(owner_id=owner_id, date=date or datetime.date.today(), flight_type="normal_flight")
+def create_project(
+    db: Session, owner_id: int, date: datetime.date | None = None, pilot_name: str | None = None
+) -> Project:
+    project = Project(
+        owner_id=owner_id,
+        date=date or datetime.date.today(),
+        flight_type="normal_flight",
+        pilot_name=pilot_name,
+    )
     db.add(project)
     db.commit()
     return get_owned_project(db, project.id, owner_id)
@@ -53,6 +60,11 @@ def create_project(db: Session, owner_id: int, date: datetime.date | None = None
 
 def set_flight_type(db: Session, project: Project, flight_type: str) -> None:
     project.flight_type = flight_type
+    db.commit()
+
+
+def set_pilot_name(db: Session, project: Project, pilot_name: str | None) -> None:
+    project.pilot_name = pilot_name
     db.commit()
 
 

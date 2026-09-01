@@ -13,6 +13,11 @@
       <input type="date" name="date"
              class="block mt-1 rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm">
     </label>
+    <label class="text-sm text-slate-400">
+      Pilot
+      <input type="text" name="pilot_name" placeholder="leave blank if it's your own flight"
+             class="block mt-1 rounded bg-slate-900 border border-slate-700 px-2 py-1 text-sm">
+    </label>
     <button type="submit" class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1.5 text-sm">New Project</button>
   </form>
   <ul class="text-sm divide-y divide-slate-700">
@@ -21,7 +26,10 @@
       <a href="/projects/{{ project.id }}" class="text-sky-300 hover:underline">
         {{ project.date if project.date else project.created_at.date() }} — {{ project.flight_type }}
       </a>
-      {% if project.full_flight_file %}<span class="text-xs text-emerald-400">full flight built</span>{% endif %}
+      <div class="flex items-center gap-2">
+        {% if project.pilot_name %}<span class="text-xs rounded px-2 py-0.5 bg-amber-700">👤 {{ project.pilot_name }}</span>{% endif %}
+        {% if project.full_flight_file %}<span class="text-xs text-emerald-400">full flight built</span>{% endif %}
+      </div>
     </li>
     {% else %}
     <li class="py-2 text-slate-400">No projects yet — create one above.</li>

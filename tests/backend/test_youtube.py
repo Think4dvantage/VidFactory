@@ -37,6 +37,7 @@ def test_youtube_metadata_shape(auth_client, db_session, user):
     body = resp.json()
 
     assert body["project_id"] == project.id
+    assert body["pilot_name"] is None
     assert {h["name"] for h in body["highlights"]} == {"Launch", "Big thermal"}
 
     assert len(body["segment_order"]) == 2
@@ -101,6 +102,19 @@ def test_youtube_metadata_includes_summary_and_fullmusic_credits(auth_client, db
 
     assert "Ridge Line" in body["summary_credits"]
     assert body["fullflight_music_credits"] is None  # no fullflight_music_file set
+
+
+def test_youtube_metadata_includes_pilot_name(auth_client, db_session, user):
+    project = Project(
+        owner_id=user.id, flight_type="normal_flight", full_flight_file="ff.mp4",
+        pilot_name="Hans",
+    )
+    db_session.add(project)
+    db_session.commit()
+
+    resp = auth_client.get(f"/api/projects/{project.id}/youtube-metadata")
+    assert resp.status_code == 200
+    assert resp.json()["pilot_name"] == "Hans"
 
 
 def test_youtube_metadata_404(auth_client):

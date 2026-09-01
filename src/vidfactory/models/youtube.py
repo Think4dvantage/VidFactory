@@ -57,6 +57,10 @@ class ProjectYoutubeMetadata(BaseModel):
     date: Date_ | None
     flight_type: str
     external_flight_id: str | None
+    # Manual free-text pilot name for footage flown by someone without their own Flightlog account
+    # (e.g. handed-over footage) — non-null flags this as not the channel owner's own flight, so a
+    # downstream tool can credit the actual pilot in the video description/title.
+    pilot_name: str | None
     full_flight_file: str | None
     summary_file: str | None
     fullflight_music_file: str | None

@@ -47,7 +47,9 @@ class Session(Base):
 class Project(Base):
     """The video work for a flight. Standalone — flight-log metadata (site/glider/date) lives in a
     separate Flightlog service; `external_flight_id` is that service's flight id (see
-    `core/flightlog_client.py`)."""
+    `core/flightlog_client.py`). `pilot_name` is a manual free-text field for footage flown by
+    someone with no Flightlog account of their own (e.g. handed-over footage) — a non-null value
+    both records who flew it and flags the project as not the owning user's own flight."""
 
     __tablename__ = "projects"
 
@@ -55,6 +57,7 @@ class Project(Base):
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     date: Mapped[Date_ | None] = mapped_column(Date)
     external_flight_id: Mapped[str | None] = mapped_column(String)
+    pilot_name: Mapped[str | None] = mapped_column(String)
     flight_type: Mapped[str] = mapped_column(String, default="normal_flight")  # | 'hike_and_fly'
     full_flight_file: Mapped[str | None] = mapped_column(String)
     preview_file: Mapped[str | None] = mapped_column(String)  # 720p editor proxy

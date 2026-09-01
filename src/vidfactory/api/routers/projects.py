@@ -71,7 +71,8 @@ async def create_project(request: Request, db: Session = Depends(get_db), user: 
     form = await request.form()
     date_str = str(form.get("date") or "")
     project_date = datetime.date.fromisoformat(date_str) if date_str else None
-    project = projects.create_project(db, user.id, date=project_date)
+    pilot_name = str(form.get("pilot_name") or "").strip() or None
+    project = projects.create_project(db, user.id, date=project_date, pilot_name=pilot_name)
     return RedirectResponse(f"/projects/{project.id}", status_code=303)
 
 
@@ -229,6 +230,17 @@ async def set_flightlog_id(project_id: int, request: Request, db: Session = Depe
     form = await request.form()
     project.external_flight_id = str(form.get("external_flight_id") or "").strip() or None
     db.commit()
+    return _redirect(project_id)
+
+
+@router.post("/api/projects/{project_id}/pilot-name", include_in_schema=False)
+async def set_pilot_name(project_id: int, request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
+    if project is None:
+        return Response(status_code=404)
+    form = await request.form()
+    pilot_name = str(form.get("pilot_name") or "").strip() or None
+    projects.set_pilot_name(db, project, pilot_name)
     return _redirect(project_id)
 
 
