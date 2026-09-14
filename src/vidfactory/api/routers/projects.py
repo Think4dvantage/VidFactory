@@ -709,7 +709,9 @@ def _summary_target(project_id: int, owner_id: int, target_seconds: float, music
             hls = [hl for hl in highlights.list_highlights(db, project_id) if hl.use_in_summary]
             segs = highlights.merge_overlaps(hls)
             segs = summary.auto_fill(segs, target_seconds, full_dur)
-            total = sum(summary._seg_duration(s) for s in segs)
+            # +cta_duration: the CTA end screen rides along at the end of every summary (see
+            # build_summary), so the music bed needs to be long enough to still be playing then.
+            total = sum(summary._seg_duration(s) for s in segs) + cfg.shorts.cta_duration
             bed, tracks = (None, [])
             if music_path:
                 job.set_stage("Selecting music")
@@ -722,6 +724,8 @@ def _summary_target(project_id: int, owner_id: int, target_seconds: float, music
                 full, segs, out, runner, gpu, width=w, height=h, fps=fps,
                 video_bitrate=cfg.encode.video_bitrate, audio_bitrate=cfg.encode.audio_bitrate,
                 music_bed=bed, music_volume=mv, original_volume=ov,
+                cta_image=str(cfg.cta_image), cta_duration=cfg.shorts.cta_duration,
+                cta_line1=cfg.shorts.cta_line1, cta_line2=cfg.shorts.cta_line2,
                 progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
             )
             if tracks:
@@ -742,18 +746,23 @@ def _fullmusic_target(project_id: int, owner_id: int, music_path: str, mv: float
             full = project.full_flight_file
             cfg = get_config()
             runner = get_runner()
+            gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
             full_dur = runner.get_video_info(full)[2]
             job.set_stage("Selecting music")
+            # +cta_duration: same reason as _summary_target — the CTA end screen is appended
+            # after the music-mixed full flight, so the bed needs to cover it too.
             bed, tracks = music.prepare_music_bed(
-                music_path, full_dur, Path(cfg.data_dir) / "tmp", runner,
+                music_path, full_dur + cfg.shorts.cta_duration, Path(cfg.data_dir) / "tmp", runner,
                 Path(cfg.data_dir) / "music_cache",
             )
             if not bed:
                 raise ValueError("No playable music found at the selected path.")
             out = projects.fullmusic_output_path(project)
             res = summary.build_fullflight_with_music(
-                full, out, bed, runner, music_volume=mv, original_volume=ov,
-                audio_bitrate=cfg.encode.audio_bitrate,
+                full, out, bed, runner, gpu, music_volume=mv, original_volume=ov,
+                audio_bitrate=cfg.encode.audio_bitrate, video_bitrate=cfg.encode.video_bitrate,
+                cta_image=str(cfg.cta_image), cta_duration=cfg.shorts.cta_duration,
+                cta_line1=cfg.shorts.cta_line1, cta_line2=cfg.shorts.cta_line2,
                 progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
             )
             music.write_credits(music.resolve_track_credits(tracks, runner), projects.credits_path_for(out))

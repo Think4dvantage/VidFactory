@@ -64,6 +64,19 @@ libx264**. `FONTCONFIG_FILE` points at `resources/fonts.conf` so `drawtext` reso
    full-flight-with-music action stream-copies video and mixes music → `DATE_FullFlight_withMusic.mp4`,
    written to `output_fullflights` alongside the plain full flight and preview (fixed 2026-08-20 —
    was landing in `output_summaries`; `core/projects.py:fullmusic_output_path`).
+   **M25: both now end on the CTA end screen** (`Config.cta_image` + `ShortsSection.cta_duration`/
+   `cta_line1`/`cta_line2` — the same "for more relaxed Paragliding / Like & Subscribe" screen
+   `shorts.build_short` already appended). `build_summary()` folds it in as one more `filter_complex`
+   concat input (looped image + `anullsrc` + two centred `drawtext` lines sized off the project's
+   own height) — free, since Summary already re-encodes every segment in one pass; the music mix
+   runs on the concat's combined `[outa]`, so music keeps playing under the CTA too.
+   `build_fullflight_with_music()` can't do that cheaply — it deliberately stream-copies the (often
+   multi-hour, 4K) video — so it instead encodes the CTA separately at the flight's own
+   resolution/fps and joins it with the concat demuxer (`-c copy`), the same normalize-then-copy
+   trick used to prepend a sped-up hike in step 1. Neither the CTA's screen time nor its (fixed,
+   config-known) duration is reflected in `youtube_meta.py`'s `segment_order` yet — already a known
+   approximation (see the M5-remainder roadmap row on exact chapter timestamps), just very slightly
+   more so now.
 **Editor proxy:** the highlight editor streams a **720p proxy** (`preview_file`, same timeline as the
 4K full flight) for smooth browser scrubbing; built by `concat.build_preview` (short GOP + faststart)
 automatically after the full flight, or on demand. IN/OUT marks map 1:1 to the 4K source.

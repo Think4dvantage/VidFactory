@@ -19,7 +19,8 @@ app.
 - **Concatenate** source parts → full flight (sped-up hike prepended for Hike & Fly); a 720p proxy
   is built alongside it for smooth scrubbing in the highlight editor.
 - **Summary** — mark named highlights, auto-fill to a target length, mix background music, write
-  credits. A separate action mixes music straight onto the full flight instead.
+  credits. A separate action mixes music straight onto the full flight instead. Both end on the
+  same "Like & Subscribe" CTA screen as Shorts, with the music still playing under it.
 - **Shorts** — vertical 1080×1920, from named highlights (hook → launch? → flying → landing? → CTA,
   <30 s) or from random pools; batch de-dup so footage is never reused.
 - **One build queue** — every render (concat, preview, summary, full-flight+music, shorts) goes
