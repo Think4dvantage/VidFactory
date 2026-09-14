@@ -142,7 +142,7 @@ def prepare_music_bed(
 # LLC's Synchronization and Master Use License) — clause 7 asks users to make "reasonable
 # efforts" to credit the author's name and each track's title wherever the music is used. This
 # is the library-level line for that; per-track author credit comes from each file's own
-# artist/title tags (resolve_track_credits below), never asserted for tracks we can't attribute.
+# artist/title tags where available, falling back to DEFAULT_ARTIST below otherwise.
 LICENSE_NOTICE = (
     "This music library is licensed under the Synchronization and Master Use License from "
     "Senpai Music Group, LLC."
@@ -162,17 +162,29 @@ def _track_meta(runner: FFmpegRunner, file: str) -> tuple[str | None, str | None
         return None, None
 
 
-# StreamBeats ships its library as bare audio files with no embedded ID3/format tags, named
-# "<track number>. <Artist> - <Title>.<ext>" (e.g. "21. Harris Heller - High Tide.mp3"). When
-# there's no tag to trust, this is the only source for a real artist/title split — without it,
-# the whole filename (including the artist) would get dumped into "title" verbatim.
+# StreamBeats' entire catalog is authored by Harris Heller (owner of Senpai Music Group, LLC —
+# the license's signatory). Its files carry no embedded ID3/format tags and, unlike most sample
+# libraries, usually don't even spell the artist out in the filename (just "<N> <Title>.<ext>",
+# e.g. "27 B-Roll.mp3" — a real deployed credits box showed this raw, numbered, artist-less). A
+# minority of files do spell it out ("21. Harris Heller - High Tide.mp3", handled by
+# `_FILENAME_ARTIST_TITLE` below); for everything else, crediting the library's one known author
+# per clause 7 ("the name of the author") beats leaving the byline off entirely.
+DEFAULT_ARTIST = "Harris Heller"
+
 _FILENAME_ARTIST_TITLE = re.compile(r"^\s*\d+\.\s*(?P<artist>.+?)\s*-\s*(?P<title>.+?)\s*$")
+
+# The leading catalog number ("27 ", "12. ") is never part of the actual title.
+_TRACK_NUMBER_PREFIX = re.compile(r"^\s*\d+\.?\s+")
+
+
+def _strip_track_number(title: str) -> str:
+    return _TRACK_NUMBER_PREFIX.sub("", title, count=1).strip() or title
 
 
 def _split_filename_credit(stem: str) -> tuple[str, str | None]:
     """Best-effort (title, artist) from a filename stem, for tracks with no usable tags."""
     m = _FILENAME_ARTIST_TITLE.match(stem)
-    return (m.group("title"), m.group("artist")) if m else (stem, None)
+    return (m.group("title"), m.group("artist")) if m else (_strip_track_number(stem), None)
 
 
 def resolve_track_credits(tracks: list[str], runner: FFmpegRunner) -> list[dict]:
@@ -182,9 +194,15 @@ def resolve_track_credits(tracks: list[str], runner: FFmpegRunner) -> list[dict]
     out = []
     for t in tracks:
         title, artist = _track_meta(runner, t)
-        if not title and not artist:
-            title, artist = _split_filename_credit(Path(t).stem)
-        out.append({"file": t, "title": title or Path(t).stem, "artist": artist})
+        if not artist:
+            # Tags (when present at all) rarely carry the artist for this library — the
+            # filename is the more reliable source, so prefer it for the artist and, when tags
+            # gave nothing, for the title too.
+            fn_title, fn_artist = _split_filename_credit(Path(t).stem)
+            title = title or fn_title
+            artist = artist or fn_artist
+        title = _strip_track_number(title or Path(t).stem)
+        out.append({"file": t, "title": title, "artist": artist or DEFAULT_ARTIST})
     return out
 
 
@@ -197,15 +215,16 @@ def normalize_music_credits(value) -> list[dict]:
         return []
     if isinstance(value, str):
         title, artist = _split_filename_credit(Path(value).stem)
-        return [{"file": value, "title": title, "artist": artist}]
+        return [{"file": value, "title": title, "artist": artist or DEFAULT_ARTIST}]
     if isinstance(value, list):
         out = []
         for v in value:
             if isinstance(v, dict):
-                out.append(v)
+                title = _strip_track_number(v.get("title") or Path(v.get("file") or "").stem)
+                out.append({**v, "title": title, "artist": v.get("artist") or DEFAULT_ARTIST})
             else:
                 title, artist = _split_filename_credit(Path(v).stem)
-                out.append({"file": v, "title": title, "artist": artist})
+                out.append({"file": v, "title": title, "artist": artist or DEFAULT_ARTIST})
         return out
     return []
 

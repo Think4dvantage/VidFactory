@@ -157,6 +157,17 @@ filesystem/ffprobe touch on page render; `music.normalize_music_credits()` coerc
 single-string shape so shorts built before this change still show credits. Summary/FullMusic have
 no DB-backed track record, so their textarea is read back from the sibling file instead
 (`core/projects.read_credits_text()`) — `None` until the next rebuild if one was built before M18.
+**M26:** StreamBeats' files carry no tags and mostly don't even spell the artist out in the
+filename — just `"<N> <Title>.<ext>"` (e.g. `"27 B-Roll.mp3"`), which a real deployed credits box
+showed raw: numbered title, no byline (the whole-catalog `"<N>. <Artist> - <Title>"` filename
+parse added for M18 only ever matched the minority of files that do spell the artist out). The
+whole catalog is authored by one person — Harris Heller, owner of Senpai Music Group LLC, the
+license's signatory — so `resolve_track_credits()`/`normalize_music_credits()` now (1) always
+strip a leading catalog-number prefix off the title regardless of where it came from (tag or
+filename), and (2) fall back to `DEFAULT_ARTIST = "Harris Heller"` whenever no real artist is
+resolvable from tags or filename, rather than leaving the byline off. `normalize_music_credits()`
+repairs already-stored dict rows the same way, so Shorts built before this fix show corrected
+credits too without a rebuild.
 
 ---
 

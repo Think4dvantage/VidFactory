@@ -53,7 +53,7 @@ def test_resolve_track_credits_uses_tags_and_falls_back_to_filename(monkeypatch)
 
     assert credits == [
         {"file": "a.mp3", "title": "Lights Up", "artist": "Harris Heller"},
-        {"file": "b.mp3", "title": "b", "artist": None},
+        {"file": "b.mp3", "title": "b", "artist": music.DEFAULT_ARTIST},
     ]
 
 
@@ -72,18 +72,37 @@ def test_resolve_track_credits_splits_streambeats_filename_when_no_tags(monkeypa
     }]
 
 
+def test_resolve_track_credits_strips_number_and_defaults_artist_for_unlabeled_files(monkeypatch):
+    # Most StreamBeats files don't spell the artist out at all, just "<N> <Title>.<ext>" (e.g.
+    # "27 B-Roll.mp3") — a real credits box showed this raw, numbered, with no byline at all.
+    # The whole library is authored by Harris Heller (see DEFAULT_ARTIST), so that's the credit.
+    monkeypatch.setattr(music, "_track_meta", lambda runner, file: (None, None))
+
+    credits = music.resolve_track_credits(["/library/27 B-Roll.mp3", "/library/12 Pastel Blue.mp3"], _StubRunner())
+
+    assert credits == [
+        {"file": "/library/27 B-Roll.mp3", "title": "B-Roll", "artist": "Harris Heller"},
+        {"file": "/library/12 Pastel Blue.mp3", "title": "Pastel Blue", "artist": "Harris Heller"},
+    ]
+
+
 def test_normalize_music_credits_handles_every_historical_shape():
     assert music.normalize_music_credits(None) == []
     assert music.normalize_music_credits("") == []
     assert music.normalize_music_credits("old/track.mp3") == [
-        {"file": "old/track.mp3", "title": "track", "artist": None}
+        {"file": "old/track.mp3", "title": "track", "artist": music.DEFAULT_ARTIST}
     ]
-    assert music.normalize_music_credits(["a/one.mp3", "b/two.mp3"]) == [
-        {"file": "a/one.mp3", "title": "one", "artist": None},
-        {"file": "b/two.mp3", "title": "two", "artist": None},
+    assert music.normalize_music_credits(["a/one.mp3", "b/27 Two.mp3"]) == [
+        {"file": "a/one.mp3", "title": "one", "artist": music.DEFAULT_ARTIST},
+        {"file": "b/27 Two.mp3", "title": "Two", "artist": music.DEFAULT_ARTIST},
     ]
     assert music.normalize_music_credits("old/21. Harris Heller - High Tide.mp3") == [
         {"file": "old/21. Harris Heller - High Tide.mp3", "title": "High Tide", "artist": "Harris Heller"}
+    ]
+    # a dict row from before this fix — raw numbered title, no artist — gets repaired in place
+    stale = [{"file": "x.mp3", "title": "27 B-Roll", "artist": None}]
+    assert music.normalize_music_credits(stale) == [
+        {"file": "x.mp3", "title": "B-Roll", "artist": music.DEFAULT_ARTIST}
     ]
     current = [{"file": "x.mp3", "title": "X", "artist": "Someone"}]
     assert music.normalize_music_credits(current) == current
