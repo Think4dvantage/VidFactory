@@ -614,6 +614,14 @@ def _short_target(
             hls = highlights.list_highlights(db, project_id)
             launch = _role_clip(hls, "launch", sc.launch_max)
             landing = _role_clip(hls, "landing", sc.landing_max)
+            # A highlight-driven short built *from* the launch highlight already plays it as the
+            # hook, right before this same launch clip would otherwise be inserted again with
+            # nothing in between (no hike, or hike footage that doesn't include it) -- two
+            # identical launch parts back to back. Landing doesn't have this problem: its hook
+            # copy sits at the very start and the role clip stays at the very end, with the
+            # flying clips in between, so the two plays don't read as one accidental repeat.
+            if hid is not None and launch and any(h.id == hid and h.role == "launch" for h in hls):
+                launch = None
 
             hike = project.hike
             use_hike = bool(hike and hike.sources and project.flight_type == "hike_and_fly")

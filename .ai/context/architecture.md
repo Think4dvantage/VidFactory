@@ -134,6 +134,19 @@ a tooltip (kind/alt-change/climb-rate), click near one to seek exactly to it.
      name, surfaced on `/api/jobs`/SSE/the queue page) purely for that per-row insight. Cancelling
      is now per-short rather than per-batch — a disclosed tradeoff, not a bulk-cancel control
      anyone has asked for.
+   - **M27: drop the duplicate launch clip when the short *is* the launch highlight.**
+     Highlight-driven composition always inserts hook, then (for `hike_and_fly`) the hike pair,
+     then the separately-resolved `launch` role clip, then flying. When the hook's own source
+     highlight is itself role `"launch"` there's nothing (no hike, for a normal flight) between
+     the hook and that role clip, so the same footage played twice in a row — reported after a
+     real deployed short showed it. `_short_target` now checks the hook's own highlight (by
+     `hid`) and, if its role is `"launch"`, drops the separately-resolved `launch` clip entirely
+     (`segments_used["launch"]` then stores `None` for that short — the hook already covers it).
+     Landing is deliberately left alone: a landing-sourced hook sits at the very start and the
+     landing role clip stays at the very end, with the flying clips in between, so the repeat
+     doesn't read as an accidental back-to-back duplicate the way launch's did. **Verified
+     locally** (`tests/backend/test_shorts_build.py`: a short built from the launch highlight
+     drops the extra launch clip; the equivalent landing case keeps both) — not yet deployed.
 4. **YouTube metadata** (`core/youtube_meta.py`, M5a — shipped as a live read API, not a written
    `metadata.json`, see `## API Contracts` → **youtube** below): highlights, summary content order,
    shorts, and — since M6 — Flightlog flight/segment data when the project has one linked, for a

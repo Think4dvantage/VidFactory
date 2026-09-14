@@ -144,6 +144,51 @@ def test_normal_flight_short_has_no_hike_clips(make_shorts_setup):
         assert 0.0 <= s and e <= 400.0
 
 
+def test_short_built_from_the_launch_highlight_drops_the_duplicate_launch_clip(make_shorts_setup):
+    # Building a short *from* the launch highlight (hid = that highlight's own id) puts it in as
+    # the hook already -- separately re-adding the "launch" role clip would play the same footage
+    # twice in a row (nothing else sits between the hook and where the role clip would land).
+    project_id, owner_id, job, captured = make_shorts_setup(flight_type="normal_flight")
+
+    Session_ = sessionmaker(bind=projects_router.get_engine(), autoflush=False, future=True)
+    with Session_() as db:
+        launch_id = db.query(Highlight).filter_by(project_id=project_id, role="launch").one().id
+
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (125.0, 130.0), "launch", launch_id, {},
+    )
+    target(job)
+
+    clips = captured[0]
+    assert len(clips) == 1 + 3 + 1  # hook(=launch), 3 flying, landing -- no separate launch clip
+    hook, fly1, fly2, fly3, landing = clips
+    assert hook == (125.0, 130.0)
+    assert landing == (395.0, 399.0)
+
+
+def test_short_built_from_the_landing_highlight_keeps_both_landing_clips(make_shorts_setup):
+    # Unlike launch, a short built from the landing highlight is expected to keep both plays --
+    # the hook copy at the very start and the role clip at the very end, with flying in between,
+    # so it doesn't read as an accidental back-to-back repeat.
+    project_id, owner_id, job, captured = make_shorts_setup(flight_type="normal_flight")
+
+    Session_ = sessionmaker(bind=projects_router.get_engine(), autoflush=False, future=True)
+    with Session_() as db:
+        landing_id = db.query(Highlight).filter_by(project_id=project_id, role="landing").one().id
+
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (395.0, 400.0), "landing", landing_id, {},
+    )
+    target(job)
+
+    clips = captured[0]
+    assert len(clips) == 1 + 1 + 3 + 1  # hook(=landing), launch, 3 flying, landing (again)
+    hook, launch, fly1, fly2, fly3, landing_clip = clips
+    assert hook == (395.0, 400.0)
+    assert launch == (125.0, 129.0)
+    assert landing_clip == (395.0, 399.0)
+
+
 def test_launch_inside_hike_segment_logs_a_warning(make_shorts_setup, caplog):
     # launch marked at 50s, well before the 120s hike/flying boundary — a mis-marked highlight,
     # not something we silently clamp, but it should be loud so a future report is diagnosable.
