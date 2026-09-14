@@ -345,7 +345,7 @@ function stageLabel(d) {
   return d.stage || d.status;
 }
 
-// Generic build runner for the summary / full-music / shorts buttons (form -> job -> SSE).
+// Generic build runner for the summary / full-music buttons (form -> job -> SSE).
 function followGenericBuild(pfx, btn, jobId) {
   document.getElementById(pfx + '-progress').hidden = false;
   btn.disabled = true;
@@ -358,6 +358,38 @@ function followGenericBuild(pfx, btn, jobId) {
     if (d.status === 'done') { document.getElementById(pfx + '-pct').textContent = '100'; document.getElementById(pfx + '-bar').value = 100; document.getElementById(pfx + '-result').textContent = '✅ ' + (d.result || '') + ` — took ${formatElapsed(d.elapsed_seconds)}`; btn.disabled = false; }
     if (d.status === 'error') { document.getElementById(pfx + '-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
   });
+}
+
+// Shorts now queue one job per short (see core/jobs.py / api/routers/projects.py `_short_target`
+// — the Job Queue page lists them individually so a batch's video count is actually visible), so
+// this page follows them one at a time in order rather than a single job's progress. Only one
+// ever runs at once anyway (the global FIFO queue), so this just walks the list.
+function followShortsBuild(pfx, btn, jobIds) {
+  document.getElementById(pfx + '-progress').hidden = false;
+  btn.disabled = true;
+  const n = jobIds.length;
+  let done = 0, failed = 0, idx = 0;
+  function next() {
+    if (idx >= n) {
+      document.getElementById(pfx + '-pct').textContent = '100';
+      document.getElementById(pfx + '-bar').value = 100;
+      document.getElementById(pfx + '-result').textContent =
+        `✅ ${done}/${n} short(s) built` + (failed ? `, ${failed} failed` : '');
+      btn.disabled = false;
+      return;
+    }
+    const i = idx;
+    window.VF.followJob(jobIds[i], (d) => {
+      document.getElementById(pfx + '-stage').textContent = `Short ${i + 1}/${n} — ${stageLabel(d)}`;
+      document.getElementById(pfx + '-pct').textContent = d.percent;
+      document.getElementById(pfx + '-bar').value = d.percent;
+      const elapsedEl = document.getElementById(pfx + '-elapsed');
+      if (elapsedEl) elapsedEl.textContent = d.elapsed_seconds != null ? `(${formatElapsed(d.elapsed_seconds)})` : '';
+      if (d.status === 'done') { done++; idx++; next(); }
+      else if (d.status === 'error' || d.status === 'cancelled') { failed++; idx++; next(); }
+    });
+  }
+  next();
 }
 
 document.querySelectorAll('[data-build]').forEach((btn) => {
@@ -375,8 +407,9 @@ document.querySelectorAll('[data-build]').forEach((btn) => {
       btn.disabled = false;
       return;
     }
-    const { job_id } = await r.json();
-    followGenericBuild(pfx, btn, job_id);
+    const body = await r.json();
+    if (body.job_ids) { followShortsBuild(pfx, btn, body.job_ids); }
+    else { followGenericBuild(pfx, btn, body.job_id); }
   });
 });
 
@@ -414,7 +447,7 @@ document.getElementById('build-btn').addEventListener('click', async () => {
 // start one, which is exactly what leads to clicking "Build" a second time and corrupting the
 // first job's output (both write to the same deterministic path).
 (async function resumeActiveJobs() {
-  const KIND_PREFIX = { summary: 'sum', fullmusic: 'fm', shorts: 'sh' };
+  const KIND_PREFIX = { summary: 'sum', fullmusic: 'fm' };
   let jobs;
   try {
     jobs = (await (await fetch('/api/jobs')).json()).data;
@@ -422,16 +455,25 @@ document.getElementById('build-btn').addEventListener('click', async () => {
     console.error('[VF:project] could not check for in-progress builds', e);
     return;
   }
+  // A shorts batch is several jobs now (one per short, in creation order) rather than one --
+  // collect them instead of re-binding followGenericBuild per job, which would just keep
+  // clobbering the same progress bar with whichever job the loop saw last.
+  const activeShorts = [];
   for (const job of jobs) {
     if (job.project_id !== {{ project.id }} || job.status !== 'running' && job.status !== 'pending') continue;
     if (job.kind === 'concat') {
       followFullFlightBuild(document.getElementById('build-btn'), job.id);
       continue;
     }
+    if (job.kind === 'shorts') { activeShorts.push(job.id); continue; }
     const pfx = KIND_PREFIX[job.kind];
     if (!pfx) continue;  // e.g. 'preview' has no progress UI on this page
     const btn = document.querySelector(`[data-prefix="${pfx}"]`);
     if (btn) followGenericBuild(pfx, btn, job.id);
+  }
+  if (activeShorts.length) {
+    const btn = document.querySelector('[data-prefix="sh"]');
+    if (btn) followShortsBuild('sh', btn, activeShorts);
   }
 })();
 </script>

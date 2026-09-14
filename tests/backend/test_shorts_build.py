@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 import vidfactory.api.routers.projects as projects_router
 from vidfactory.config import ShortsSection
-from vidfactory.core.jobs import Job
+from vidfactory.core.jobs import Job, registry
 from vidfactory.database.models import Base, Hike, Highlight, Project, User
 
 
@@ -96,7 +96,9 @@ def make_shorts_setup(tmp_path, monkeypatch):
 def test_hike_and_fly_short_composition_order(make_shorts_setup):
     project_id, owner_id, job, captured = make_shorts_setup()
 
-    target = projects_router._shorts_target(project_id, owner_id, "highlight", 1, "", 0.35, 1.0)
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (200.0, 206.0), "Ridge soaring", None, {},
+    )
     target(job)
 
     assert len(captured) == 1
@@ -126,7 +128,9 @@ def test_hike_and_fly_short_composition_order(make_shorts_setup):
 def test_normal_flight_short_has_no_hike_clips(make_shorts_setup):
     project_id, owner_id, job, captured = make_shorts_setup(flight_type="normal_flight")
 
-    target = projects_router._shorts_target(project_id, owner_id, "highlight", 1, "", 0.35, 1.0)
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (200.0, 206.0), "Ridge soaring", None, {},
+    )
     target(job)
 
     clips = captured[0]
@@ -145,8 +149,55 @@ def test_launch_inside_hike_segment_logs_a_warning(make_shorts_setup, caplog):
     # not something we silently clamp, but it should be loud so a future report is diagnosable.
     project_id, owner_id, job, captured = make_shorts_setup(launch_start=50.0)
 
-    target = projects_router._shorts_target(project_id, owner_id, "highlight", 1, "", 0.35, 1.0)
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (200.0, 206.0), "Ridge soaring", None, {},
+    )
     with caplog.at_level("WARNING"):
         target(job)
 
     assert any("launch highlight starts" in r.message for r in caplog.records)
+
+
+# --- api/routers/projects.py:build_shorts_ep -- one queued job per short, not one job total ---
+
+
+def test_build_shorts_highlight_mode_queues_one_job_per_flagged_highlight(auth_client, db_session, user):
+    project = Project(owner_id=user.id, flight_type="normal_flight", full_flight_file="/full.mp4")
+    db_session.add(project)
+    db_session.commit()
+    db_session.add(Highlight(project_id=project.id, name="Takeoff", start=10.0, end=20.0, make_short=True))
+    db_session.add(Highlight(project_id=project.id, name="Thermal", start=100.0, end=110.0, make_short=True))
+    db_session.add(Highlight(project_id=project.id, name="Scenery", start=200.0, end=210.0, make_short=False))
+    db_session.commit()
+
+    resp = auth_client.post(f"/api/projects/{project.id}/shorts/build", data={"mode": "highlight"})
+    assert resp.status_code == 200
+    job_ids = resp.json()["job_ids"]
+    assert len(job_ids) == 2  # one per make_short highlight, not one job for the whole batch
+
+    jobs = [registry.get(jid) for jid in job_ids]
+    assert all(j is not None and j.kind == "shorts" and j.project_id == project.id for j in jobs)
+    assert {j.title for j in jobs} == {"Takeoff", "Thermal"}  # queue can show which short is which
+
+
+def test_build_shorts_random_mode_queues_count_jobs(auth_client, db_session, user):
+    project = Project(owner_id=user.id, flight_type="normal_flight", full_flight_file="/full.mp4")
+    db_session.add(project)
+    db_session.commit()
+
+    resp = auth_client.post(
+        f"/api/projects/{project.id}/shorts/build", data={"mode": "random", "count": "4"},
+    )
+    assert resp.status_code == 200
+    job_ids = resp.json()["job_ids"]
+    assert len(job_ids) == 4
+    assert len({registry.get(jid).id for jid in job_ids}) == 4  # 4 distinct jobs, not one reused
+
+
+def test_build_shorts_highlight_mode_400s_when_none_flagged(auth_client, db_session, user):
+    project = Project(owner_id=user.id, flight_type="normal_flight", full_flight_file="/full.mp4")
+    db_session.add(project)
+    db_session.commit()
+
+    resp = auth_client.post(f"/api/projects/{project.id}/shorts/build", data={"mode": "highlight"})
+    assert resp.status_code == 400

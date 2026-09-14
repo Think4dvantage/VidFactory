@@ -3,12 +3,14 @@
 Normal flight: parts are stream-copied via the concat demuxer (fast, lossless) — Insta360 30-min
 splits are homogeneous. Hike & Fly: the hiking footage is prepended. If it's already time-lapsed on
 delivery (the usual case, speed_factor == 1.0) it is copied as-is; otherwise it is re-encoded with a
-setpts/atempo speed-up (NVENC) to match the flight before the stream-copy concat.
+setpts/atempo speed-up (NVENC) to match the flight before the stream-copy concat. A single source
+part with no hike needs no concat at all — it's copied straight to the output path.
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
@@ -134,6 +136,16 @@ def concatenate(
             raise FileNotFoundError(f"Source file not found: {f}")
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
+
+    if len(parts) == 1 and not hike_files:
+        if stage_cb:
+            stage_cb("Copying")
+        shutil.copy2(parts[0], output)
+        if progress_cb:
+            progress_cb(1.0, "")
+        duration = runner.get_video_info(output)[2]
+        logger.info("Full flight built: %s (%.1fs) — single source part, copied as-is", output, duration)
+        return {"output": output, "duration": duration}
 
     part_dur = sum(runner.get_video_info(p)[2] for p in parts)
     hike_in_dur = sum(runner.get_video_info(h)[2] for h in (hike_files or []))

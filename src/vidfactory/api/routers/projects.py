@@ -6,7 +6,7 @@ import uuid
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,7 @@ from vidfactory.core.concat import build_preview, concatenate, hike_output_durat
 from vidfactory.core.ffmpeg_runner import get_runner
 from vidfactory.core.jobs import registry
 from vidfactory.database.db import get_db, get_engine
-from vidfactory.database.models import Project, Short, User
+from vidfactory.database.models import Highlight, Project, Short, User
 from vidfactory.models.highlight import HighlightIn, HighlightOut
 
 logger = logging.getLogger(__name__)
@@ -194,6 +194,25 @@ def create_highlight(project_id: int, payload: HighlightIn, db: Session = Depend
     return HighlightOut.model_validate(h)
 
 
+@router.post("/api/projects/{project_id}/highlights/picture-upload", include_in_schema=False)
+async def upload_highlight_picture(project_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(require_user)):
+    # Registered before the /highlights/{highlight_id} routes below: Starlette matches path
+    # patterns before FastAPI converts params, so a literal "picture-upload" segment would
+    # otherwise match {highlight_id}: int first and 422 on the failed int conversion.
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in filebrowser.IMAGE_EXT:
+        return JSONResponse({"error": f"Unsupported image type: {ext or 'unknown'}"}, status_code=400)
+    dest_dir = get_config().uploads_dir_path / str(project_id) / "pictures"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = _dedupe_name(dest_dir, Path(file.filename).name)
+    data = await file.read()
+    dest.write_bytes(data)
+    logger.info("Picture highlight image uploaded — project=%s file=%s (%d bytes)", project_id, dest, len(data))
+    return JSONResponse({"image_path": str(dest)})
+
+
 @router.post("/api/projects/{project_id}/highlights/{highlight_id}", include_in_schema=False)
 def update_highlight(project_id: int, highlight_id: int, payload: HighlightIn, db: Session = Depends(get_db), user: User = Depends(require_user)):
     if projects.get_owned_project(db, project_id, user.id) is None:
@@ -210,6 +229,16 @@ def delete_highlight(project_id: int, highlight_id: int, db: Session = Depends(g
         return Response(status_code=404)
     highlights.delete_highlight(db, highlight_id)
     return Response(status_code=204)
+
+
+@router.get("/api/projects/{project_id}/highlights/{highlight_id}/picture", include_in_schema=False)
+def highlight_picture(project_id: int, highlight_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    if projects.get_owned_project(db, project_id, user.id) is None:
+        return Response(status_code=404)
+    h = db.get(Highlight, highlight_id)
+    if h is None or h.project_id != project_id or not h.image_path or not Path(h.image_path).exists():
+        return Response(status_code=404)
+    return FileResponse(h.image_path)
 
 
 @router.post("/api/projects/{project_id}/flight-type", include_in_schema=False)
@@ -498,17 +527,40 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
     music_path = str(form.get("music_path") or "")
     mv = float(form.get("music_volume") or 0.35)
     ov = float(form.get("original_volume") or 1.0)
+    cfg = get_config()
+    # One task per short to build -- resolved here (cheap: DB only, no ffprobe/ffmpeg) so each
+    # becomes its own queued job below, rather than one "shorts" job silently building N videos
+    # with no visible sign of how many are left (see M24: the Job Queue page listed exactly one
+    # row no matter how many shorts a highlight-driven batch produced).
+    if mode == "highlight":
+        hls = highlights.list_highlights(db, project_id)
+        tasks = [
+            ((hl.start, min(hl.end, hl.start + cfg.shorts.hook_max)), hl.name, hl.id)
+            for hl in hls if hl.make_short
+        ]
+        if not tasks:
+            return Response("No highlights flagged 'make short'.", status_code=400)
+    else:
+        tasks = [(None, None, None) for _ in range(max(1, count))]
     logger.info(
-        "[VF:shorts] build requested project=%s mode=%s count=%s music_path=%r",
-        project_id, mode, count, music_path,
+        "[VF:shorts] build requested project=%s mode=%s count=%s music_path=%r -> %d short(s) queued",
+        project_id, mode, count, music_path, len(tasks),
     )
     if registry.find_active("shorts", project_id):
         return _build_conflict("shorts")
-    job = registry.run(
-        "shorts", user.id, _shorts_target(project_id, user.id, mode, count, music_path, mv, ov),
-        project_id=project_id,
-    )
-    return {"job_id": job.id}
+    # Shared across every job below (not per-job state) so the flying/hike-clip de-dup that used
+    # to happen within one big loop still holds across the whole batch -- the global queue runs
+    # jobs strictly one at a time, so mutating this same dict from each job's target in turn is safe.
+    used: shorts_engine.UsedMap = {}
+    job_ids = [
+        registry.run(
+            "shorts", user.id,
+            _short_target(project_id, user.id, mode, music_path, mv, ov, hook, title, hid, used),
+            project_id=project_id, title=title or "",
+        ).id
+        for hook, title, hid in tasks
+    ]
+    return {"job_ids": job_ids}
 
 
 def _flying_pool(project: Project, full_dur: float, start: float = 0.0) -> list[tuple[float, float]]:
@@ -540,7 +592,16 @@ def _next_short_path(project: Project) -> str:
     return str(root / f"{stem}_Short_{nn:02d}.mp4")
 
 
-def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_path: str, mv: float, ov: float):
+def _short_target(
+    project_id: int, owner_id: int, mode: str, music_path: str, mv: float, ov: float,
+    hook: tuple[float, float] | None, title: str | None, hid: int | None,
+    used: shorts_engine.UsedMap,
+):
+    """Builds exactly one short. `used` is shared (by closure) across every task in the same
+    batch — see `build_shorts_ep` — so the flying/hike-clip de-dup across a batch's shorts still
+    works even though each is now its own queued job rather than one loop inside a single job.
+    Highlights/pool/launch/landing are re-fetched fresh here rather than passed in from the
+    request, since a batch can sit queued a while (behind other users' jobs) before this runs."""
     def target(job):
         with Session(get_engine()) as db:
             project = projects.get_owned_project(db, project_id, owner_id)
@@ -574,75 +635,57 @@ def _shorts_target(project_id: int, owner_id: int, mode: str, count: int, music_
                     )
 
             pool = _flying_pool(project, dur, start=hike_end)
-            used: shorts_engine.UsedMap = {}
 
-            if mode == "highlight":
-                tasks = [
-                    ((hl.start, min(hl.end, hl.start + sc.hook_max)), hl.name, hl.id)
-                    for hl in hls if hl.make_short
-                ]
-                if not tasks:
-                    raise ValueError("No highlights flagged 'make short'.")
-            else:
-                tasks = [(None, None, None) for _ in range(max(1, count))]
-
-            built = []
-            n = len(tasks)
-            for i, (hook, title, hid) in enumerate(tasks):
-                if job.cancel_event.is_set():
-                    break
-                job.set_stage(f"Short {i + 1}/{n}")
-                hike_clips = (
-                    shorts_engine.pick_clips(hike_pool, sc.hike_clip_count, sc.clip_duration, used, full)
-                    if use_hike else []
+            job.set_stage("Picking clips")
+            hike_clips = (
+                shorts_engine.pick_clips(hike_pool, sc.hike_clip_count, sc.clip_duration, used, full)
+                if use_hike else []
+            )
+            flying = shorts_engine.pick_clips(pool, sc.flying_clip_count, sc.clip_duration, used, full)
+            if not flying:
+                raise ValueError("Flying pool exhausted — not enough unused footage.")
+            clips = (
+                ([hook] if hook else [])
+                + hike_clips
+                + ([launch] if launch else [])
+                + flying
+                + ([landing] if landing else [])
+            )
+            total_needed = sum(e - s for s, e in clips) + sc.cta_duration
+            bed, tracks = (None, [])
+            if music_path:
+                job.set_stage("Preparing music")
+                bed, tracks = music.prepare_music_bed(
+                    music_path, total_needed, Path(cfg.data_dir) / "tmp", runner,
+                    Path(cfg.data_dir) / "music_cache",
                 )
-                flying = shorts_engine.pick_clips(pool, sc.flying_clip_count, sc.clip_duration, used, full)
-                if not flying:
-                    raise ValueError("Flying pool exhausted — not enough unused footage.")
-                clips = (
-                    ([hook] if hook else [])
-                    + hike_clips
-                    + ([launch] if launch else [])
-                    + flying
-                    + ([landing] if landing else [])
-                )
-                total_needed = sum(e - s for s, e in clips) + sc.cta_duration
-                bed, tracks = (None, [])
-                if music_path:
-                    bed, tracks = music.prepare_music_bed(
-                        music_path, total_needed, Path(cfg.data_dir) / "tmp", runner,
-                        Path(cfg.data_dir) / "music_cache",
-                    )
-                out = _next_short_path(project)
+            out = _next_short_path(project)
 
-                def scaled(frac, spd, _i=i, _n=n):
-                    job.set_progress((_i + frac) / _n, spd)
-
-                res = shorts_engine.build_short(
-                    full, clips, out, runner, gpu, src_w=w, src_h=h,
-                    cta_image=str(cfg.cta_image), cta_duration=sc.cta_duration,
-                    cta_line1=sc.cta_line1, cta_line2=sc.cta_line2,
-                    video_bitrate=sc.video_bitrate, audio_bitrate=sc.audio_bitrate,
-                    music_bed=bed, music_volume=mv, original_volume=ov,
-                    progress_cb=scaled, cancel_event=job.cancel_event,
-                )
-                # Resolved once here (title/artist tags) and reused for both the sibling credits
-                # file and the DB record, so the project page never has to re-probe ffprobe just
-                # to show the pasteable text (see core/music.resolve_track_credits).
-                music_credits = music.resolve_track_credits(tracks, runner) if tracks else []
-                if music_credits:
-                    music.write_credits(music_credits, projects.credits_path_for(out))
-                db.add(Short(
-                    project_id=project_id, output_file=res["output"], short_type=mode,
-                    duration=res["duration"], source_highlight_id=hid, title=title,
-                    segments_used={"hook": hook, "hike": hike_clips, "launch": launch, "flying": flying,
-                                   "landing": landing, "music": music_credits},
-                ))
-                db.commit()
-                if bed:
-                    Path(bed).unlink(missing_ok=True)
-                built.append(res["output"])
-            return f"{len(built)} short(s)"
+            job.set_stage("Encoding short")
+            res = shorts_engine.build_short(
+                full, clips, out, runner, gpu, src_w=w, src_h=h,
+                cta_image=str(cfg.cta_image), cta_duration=sc.cta_duration,
+                cta_line1=sc.cta_line1, cta_line2=sc.cta_line2,
+                video_bitrate=sc.video_bitrate, audio_bitrate=sc.audio_bitrate,
+                music_bed=bed, music_volume=mv, original_volume=ov,
+                progress_cb=job.set_progress, cancel_event=job.cancel_event,
+            )
+            # Resolved once here (title/artist tags) and reused for both the sibling credits
+            # file and the DB record, so the project page never has to re-probe ffprobe just
+            # to show the pasteable text (see core/music.resolve_track_credits).
+            music_credits = music.resolve_track_credits(tracks, runner) if tracks else []
+            if music_credits:
+                music.write_credits(music_credits, projects.credits_path_for(out))
+            db.add(Short(
+                project_id=project_id, output_file=res["output"], short_type=mode,
+                duration=res["duration"], source_highlight_id=hid, title=title,
+                segments_used={"hook": hook, "hike": hike_clips, "launch": launch, "flying": flying,
+                               "landing": landing, "music": music_credits},
+            ))
+            db.commit()
+            if bed:
+                Path(bed).unlink(missing_ok=True)
+            return res["output"]
 
     return target
 

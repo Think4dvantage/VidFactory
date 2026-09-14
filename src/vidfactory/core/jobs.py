@@ -28,6 +28,7 @@ class Job:
     kind: str
     owner_id: int
     project_id: int = 0
+    title: str = ""  # e.g. which highlight a "shorts" job is for, when a build fans out to several jobs
     status: str = "pending"  # pending | running | done | error | cancelled
     stage: str = ""
     percent: float = 0.0
@@ -56,6 +57,7 @@ class Job:
             "id": self.id,
             "kind": self.kind,
             "project_id": self.project_id,
+            "title": self.title,
             "status": self.status,
             "stage": self.stage,
             "percent": self.percent,
@@ -130,11 +132,12 @@ class JobRegistry:
         return None
 
     def run(
-        self, kind: str, owner_id: int, target: Callable[[Job], Optional[str]], project_id: int = 0
+        self, kind: str, owner_id: int, target: Callable[[Job], Optional[str]], project_id: int = 0,
+        title: str = "",
     ) -> Job:
         """Create a job and enqueue it. Returns immediately -- the job may sit as `pending`
         behind others already queued/running before the single worker thread reaches it."""
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind, owner_id=owner_id, project_id=project_id)
+        job = Job(id=uuid.uuid4().hex[:12], kind=kind, owner_id=owner_id, project_id=project_id, title=title)
         with self._lock:
             self._jobs[job.id] = job
         logger.info("Job [%s] %s queued (position %s)", kind, job.id, self.position_in_queue(job.id))

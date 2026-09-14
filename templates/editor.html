@@ -32,11 +32,17 @@
     <!-- Mark form -->
     <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
       <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Mark highlight</h2>
+      <div class="flex gap-4 mb-2 text-sm">
+        <label class="flex items-center gap-1"><input type="radio" name="f-type" id="f-type-video" value="video" checked> Video clip</label>
+        <label class="flex items-center gap-1"><input type="radio" name="f-type" id="f-type-picture" value="picture"> Picture</label>
+      </div>
       <div class="flex items-center gap-2 mb-2 text-sm">
         <button id="set-in" class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1">[I] Set IN</button>
         <span>IN <b id="in-label">—</b></span>
-        <button id="set-out" class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1">[O] Set OUT</button>
-        <span>OUT <b id="out-label">—</b></span>
+        <span id="out-group" class="flex items-center gap-2">
+          <button id="set-out" class="rounded bg-slate-700 hover:bg-slate-600 px-2 py-1">[O] Set OUT</button>
+          <span>OUT <b id="out-label">—</b></span>
+        </span>
       </div>
       <input type="hidden" id="edit-id">
       <div class="grid gap-2 text-sm">
@@ -44,6 +50,15 @@
           <input id="f-name" class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
         <label class="flex flex-col">Comment (overlay)
           <input id="f-comment" class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+        <div id="picture-fields" class="hidden grid gap-2 border border-slate-700 rounded p-2">
+          <label class="flex flex-col">Image
+            <input type="file" id="f-image-file" accept="image/png,image/jpeg" class="text-xs"></label>
+          <span id="image-upload-status" class="text-xs text-slate-400"></span>
+          <img id="image-preview" class="hidden max-h-28 rounded border border-slate-600">
+          <input type="hidden" id="f-image-path">
+          <label class="flex flex-col w-32">Duration (s)
+            <input type="number" id="f-duration" value="5" min="1" step="0.5" class="rounded bg-slate-900 border border-slate-600 px-2 py-1"></label>
+        </div>
         <div class="flex gap-4">
           <label class="flex items-center gap-1">Role
             <select id="f-role" class="rounded bg-slate-900 border border-slate-600 px-2 py-1">
@@ -63,7 +78,9 @@
 
     <!-- List -->
     <section class="rounded-lg border border-slate-700 bg-slate-800 p-4">
-      <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Highlights (<span id="count">0</span>)</h2>
+      <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-2">
+        Highlights (<span id="count">0</span>) — combined length: <span id="hl-total" class="text-slate-200 font-mono">0:00.0</span>
+      </h2>
       <div id="hl-list" class="text-sm divide-y divide-slate-700/60 max-h-[50vh] overflow-y-auto"></div>
     </section>
   </div>

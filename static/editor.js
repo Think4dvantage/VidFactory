@@ -63,8 +63,31 @@
     draw();
   }
 
+  // Mirrors core/highlights.py:merge_overlaps — overlapping video ranges collapse into one
+  // span so a summary-length estimate doesn't double-count them; pictures are point inserts
+  // and always add their own duration. Only highlights flagged "use in summary" count, since
+  // that's exactly what a real summary build would include (see build_summary_ep).
+  function mergedSummarySeconds(hls) {
+    const included = hls.filter((h) => h.use_in_summary);
+    const videos = included
+      .filter((h) => h.type === "video")
+      .sort((a, b) => a.start - b.start || a.end - b.end);
+    let total = 0, lastEnd = null;
+    videos.forEach((h) => {
+      if (lastEnd != null && h.start <= lastEnd) {
+        if (h.end > lastEnd) { total += h.end - lastEnd; lastEnd = h.end; }
+      } else {
+        total += h.end - h.start;
+        lastEnd = h.end;
+      }
+    });
+    included.filter((h) => h.type === "picture").forEach((h) => { total += h.duration || 5.0; });
+    return total;
+  }
+
   function renderList() {
     document.getElementById("count").textContent = highlights.length;
+    document.getElementById("hl-total").textContent = fmt(mergedSummarySeconds(highlights));
     const el = document.getElementById("hl-list");
     el.innerHTML = "";
     highlights.forEach((h) => {
@@ -72,9 +95,13 @@
       row.className = "flex items-center justify-between py-1 gap-2";
       const tag = h.role !== "normal" ? ` [${h.role}]` : "";
       const flags = (h.make_short ? "🎬" : "") + (h.use_in_summary ? "" : " (excl)");
+      const icon = h.type === "picture" ? "🖼 " : "";
+      const range = h.type === "picture"
+        ? `${fmt(h.start)} (${(h.duration || 5).toFixed(1)}s)`
+        : `${fmt(h.start)}–${fmt(h.end)}`;
       row.innerHTML =
         `<button class="text-left flex-1 hover:text-sky-300" data-seek="${h.start}">` +
-        `<b>${escapeHtml(h.name)}</b>${tag} <span class="text-slate-500">${fmt(h.start)}–${fmt(h.end)}</span> ${flags}</button>` +
+        `<b>${icon}${escapeHtml(h.name)}</b>${tag} <span class="text-slate-500">${range}</span> ${flags}</button>` +
         `<span class="flex gap-1 shrink-0">` +
         `<button class="rounded bg-slate-700 hover:bg-slate-600 px-2" data-edit="${h.id}">edit</button>` +
         `<button class="rounded bg-rose-800 hover:bg-rose-700 px-2" data-del="${h.id}">✕</button></span>`;
@@ -93,7 +120,7 @@
     highlights.forEach((hl) => {
       const x = (hl.start / dur) * w;
       const ww = Math.max(2, ((hl.end - hl.start) / dur) * w);
-      ctx.fillStyle = ROLE_COLOR[hl.role] || ROLE_COLOR.normal;
+      ctx.fillStyle = hl.type === "picture" ? "#a855f7" : (ROLE_COLOR[hl.role] || ROLE_COLOR.normal);
       ctx.fillRect(x, 6, ww, h - 20);
     });
     hints.forEach((hint) => {
@@ -121,36 +148,87 @@
     return d.innerHTML;
   }
 
+  // Role/"make short" only make sense for video ranges — both feed straight into ffmpeg trims
+  // of the full-flight video elsewhere (shorts hook/launch/landing clips), so a picture there
+  // would try to cut a zero-length/nonsensical range. Force them off at the UI level.
+  function applyTypeUI(type) {
+    document.getElementById("out-group").classList.toggle("hidden", type === "picture");
+    document.getElementById("picture-fields").classList.toggle("hidden", type !== "picture");
+    const roleSel = document.getElementById("f-role");
+    const shortChk = document.getElementById("f-short");
+    roleSel.disabled = type === "picture";
+    shortChk.disabled = type === "picture";
+    if (type === "picture") {
+      roleSel.value = "normal";
+      shortChk.checked = false;
+    }
+  }
+
   function setForm(h) {
     document.getElementById("edit-id").value = h ? h.id : "";
     document.getElementById("f-name").value = h ? h.name : "";
     document.getElementById("f-comment").value = h ? (h.comment || "") : "";
+    const type = h ? h.type : "video";
+    document.getElementById("f-type-video").checked = type === "video";
+    document.getElementById("f-type-picture").checked = type === "picture";
     document.getElementById("f-role").value = h ? h.role : "normal";
     document.getElementById("f-summary").checked = h ? h.use_in_summary : true;
     document.getElementById("f-short").checked = h ? h.make_short : false;
+    document.getElementById("f-duration").value = h && h.duration ? h.duration : 5;
+    document.getElementById("f-image-path").value = h && h.image_path ? h.image_path : "";
+    document.getElementById("f-image-file").value = "";
+    document.getElementById("image-upload-status").textContent = "";
+    const preview = document.getElementById("image-preview");
+    if (h && type === "picture" && h.id) {
+      preview.src = `${api}/${h.id}/picture`;
+      preview.classList.remove("hidden");
+    } else {
+      preview.removeAttribute("src");
+      preview.classList.add("hidden");
+    }
     inT = h ? h.start : null;
-    outT = h ? h.end : null;
+    outT = h && type === "video" ? h.end : null;
     document.getElementById("in-label").textContent = fmt(inT);
     document.getElementById("out-label").textContent = fmt(outT);
     document.getElementById("save-btn").textContent = h ? "Save changes" : "Add highlight";
     document.getElementById("cancel-btn").classList.toggle("hidden", !h);
+    applyTypeUI(type);
     draw();
   }
 
   async function save() {
     const id = document.getElementById("edit-id").value;
-    if (inT == null || outT == null || outT <= inT) { alert("Set IN and OUT first (OUT after IN)."); return; }
+    const type = document.querySelector('input[name="f-type"]:checked').value;
     const name = document.getElementById("f-name").value.trim();
     if (!name) { alert("Name is required."); return; }
-    const body = {
-      name,
-      start: inT, end: outT,
-      comment: document.getElementById("f-comment").value.trim() || null,
-      role: document.getElementById("f-role").value,
-      use_in_summary: document.getElementById("f-summary").checked,
-      make_short: document.getElementById("f-short").checked,
-      type: "video",
-    };
+    const comment = document.getElementById("f-comment").value.trim() || null;
+    let body;
+    if (type === "picture") {
+      if (inT == null) { alert("Mark a position first (Set IN)."); return; }
+      const imagePath = document.getElementById("f-image-path").value;
+      if (!imagePath) { alert("Upload an image first."); return; }
+      const duration = parseFloat(document.getElementById("f-duration").value) || 5.0;
+      body = {
+        name, comment,
+        start: inT, end: inT + duration,
+        role: "normal",
+        use_in_summary: document.getElementById("f-summary").checked,
+        make_short: false,
+        type: "picture",
+        image_path: imagePath,
+        duration,
+      };
+    } else {
+      if (inT == null || outT == null || outT <= inT) { alert("Set IN and OUT first (OUT after IN)."); return; }
+      body = {
+        name, comment,
+        start: inT, end: outT,
+        role: document.getElementById("f-role").value,
+        use_in_summary: document.getElementById("f-summary").checked,
+        make_short: document.getElementById("f-short").checked,
+        type: "video",
+      };
+    }
     const url = id ? `${api}/${id}` : api;
     const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) { alert("Save failed: " + (await r.text())); return; }
@@ -158,6 +236,38 @@
     setForm(null);
     await load();
   }
+
+  document.querySelectorAll('input[name="f-type"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      if (radio.value === "picture") outT = null;
+      applyTypeUI(radio.value);
+      draw();
+    });
+  });
+
+  document.getElementById("f-image-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const preview = document.getElementById("image-preview");
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove("hidden");
+    const status = document.getElementById("image-upload-status");
+    status.textContent = "Uploading…";
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const r = await fetch(`${api}/picture-upload`, { method: "POST", body: fd });
+      if (!r.ok) { status.textContent = "Upload failed: " + (await r.text()); return; }
+      const data = await r.json();
+      document.getElementById("f-image-path").value = data.image_path;
+      status.textContent = "Uploaded ✓";
+      log("picture uploaded", data.image_path);
+    } catch (err) {
+      status.textContent = "Upload failed.";
+      log("picture upload error", err);
+    }
+  });
 
   // events
   document.getElementById("set-in").addEventListener("click", () => {

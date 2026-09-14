@@ -55,6 +55,8 @@ libx264**. `FONTCONFIG_FILE` points at `resources/fonts.conf` so `drawtext` reso
 
 1. **Concat → Full Flight** (`concat.py`) — FFmpeg concat demuxer over ordered `source_parts`; for
    H&F, speed up `hikes.sources` (`setpts` + chained `atempo`) and **prepend**. → `DATE_FullFlight.mp4`.
+   **M22:** a single source part with no hike needs no concat at all — `concatenate()` just copies
+   it straight to the output path (`shutil.copy2`), skipping ffmpeg entirely for that case.
 2. **Summary** (`summary.py`) — dedup/merge overlapping highlights; **auto-fill** evenly-distributed
    non-overlapping filler to reach target length; single-pass `filter_complex` (`trim`/`atrim` per
    highlight, `drawtext` overlay = highlight name, `concat=n=…:v=1:a=1`); picture highlights via
@@ -101,11 +103,24 @@ a tooltip (kind/alt-change/climb-rate), click near one to seek exactly to it.
      drawing one subclip per bucket (falling back to the whole pool — logged — only if a bucket has
      no free room), guaranteeing genuine spread instead of relying on statistics. `launch`/`landing`
      highlights are user-marked and bypass this pool entirely; if one is mismarked inside the hike
-     segment, `_shorts_target` logs a warning (`"launch highlight starts ... before the hike segment
-     ends"`) rather than silently clamping someone's manual mark. New `ShortsSection.hike_clip_count`
+     segment, `_short_target` (renamed from `_shorts_target` at M24 — see below) logs a warning
+     (`"launch highlight starts ... before the hike segment ends"`) rather than silently clamping
+     someone's manual mark. New `ShortsSection.hike_clip_count`
      (default 2). **Verified locally** (`tests/backend/test_shorts_engine.py`,
      `tests/backend/test_shorts_build.py`) — not yet re-verified against a real rebuild of the
      12.07.2026 project (needs a live host; not yet deployed).
+   - **M24: one queued job per short.** `build_shorts_ep` resolves the batch's task list (hook
+     range/title/highlight id for highlight mode, `count` blank tasks for random — DB-only, no
+     ffprobe) and calls `registry.run("shorts", ...)` once per task instead of once for the whole
+     batch, so the Job Queue page (M17) shows the real count of videos being produced instead of
+     one row regardless of batch size. `_shorts_target`'s loop became `_short_target`, building
+     exactly one short; the `UsedMap` de-dup that has to span the whole batch is created once in
+     the endpoint and shared by closure across every task's job (safe since the M13 global queue
+     runs one job at a time — those closures never run concurrently, just possibly interleaved
+     with unrelated jobs from other projects/users). `Job` gained a `title` field (the highlight
+     name, surfaced on `/api/jobs`/SSE/the queue page) purely for that per-row insight. Cancelling
+     is now per-short rather than per-batch — a disclosed tradeoff, not a bulk-cancel control
+     anyone has asked for.
 4. **YouTube metadata** (`core/youtube_meta.py`, M5a — shipped as a live read API, not a written
    `metadata.json`, see `## API Contracts` → **youtube** below): highlights, summary content order,
    shorts, and — since M6 — Flightlog flight/segment data when the project has one linked, for a
@@ -132,7 +147,7 @@ no DB-backed track record, so their textarea is read back from the sibling file 
 
 ---
 
-## API Contracts (implemented through M8)
+## API Contracts (implemented through M23)
 
 Pages return HTML (`include_in_schema=False`); mutations mostly reply `204 + HX-Redirect`; FFmpeg
 builds return `{job_id}` and stream progress over SSE. Every route except `GET /health` and
@@ -205,10 +220,21 @@ in, see Storage & mounts. `POST /api/projects/{id}/hike/remove` (form `index`, r
 `Hike.sources` entry by position) ·
 `GET /api/projects/{id}/fullflight/video` (range stream; serves 720p `preview_file` if
 present) · highlight CRUD `GET/POST /api/projects/{id}/highlights[/{hid}[/delete]]` (JSON) ·
+**M23:** `POST /api/projects/{id}/highlights/picture-upload` (plain multipart `file=`, not chunked —
+images are small; extension checked against `filebrowser.IMAGE_EXT`, stored under
+`VF_UPLOADS_DIR/{id}/pictures/`, returns `{"image_path": ...}` to attach on the highlight
+create/update call) and `GET /api/projects/{id}/highlights/{hid}/picture` (serves that file back,
+ownership-checked, for the editor's preview thumbnail) — registered *before* the
+`/highlights/{highlight_id}` routes above, since Starlette matches path patterns before FastAPI
+converts params: a literal `picture-upload` segment would otherwise match `{highlight_id}: int`
+first and 422 on the failed conversion rather than falling through ·
 `GET /api/projects/{id}/flightlog-hints` (M8, `core/flightlog_hints.py`) — segment-derived timeline
 hints for the highlight editor, `{"status": "no_launch_marked"|"unavailable"|"ok", "hints": [...]}`;
 never errors, always 200 (see Core concept / Storage & mounts style best-effort pattern) ·
-builds (return `{job_id}`): `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/build,shorts/build}` ·
+builds: `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/build,shorts/build}`,
+each returning `{"job_id": ...}` **except `shorts/build`**, which since **M24** returns
+`{"job_ids": [...]}` — one per short queued in the batch, so the caller (and the Job Queue page)
+can see how many videos are actually being produced instead of one opaque job ·
 `GET /api/projects/{id}/status`.
 
 **sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result,elapsed_seconds,

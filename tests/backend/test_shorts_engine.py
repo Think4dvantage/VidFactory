@@ -67,3 +67,30 @@ def test_hike_output_duration_applies_speed_factor():
 
     dur = concat.hike_output_duration(["a.mp4"], 32.0, FakeRunner())
     assert dur == 10.0
+
+
+def test_concatenate_single_part_no_hike_copies_instead_of_encoding(tmp_path):
+    class FakeRunner:
+        def get_video_info(self, path):
+            return (1920, 1080, 42.0)
+
+    class ExplodingGPU:
+        def encoding_args(self, bitrate):
+            raise AssertionError("a single source part must not go through the encoder")
+
+    src = tmp_path / "part1.mp4"
+    src.write_bytes(b"fake video data")
+    output = tmp_path / "out" / "full_flight.mp4"
+    stages: list[str] = []
+    progress: list[tuple[float, str]] = []
+
+    result = concat.concatenate(
+        [str(src)], str(output), FakeRunner(), ExplodingGPU(),
+        progress_cb=lambda frac, speed: progress.append((frac, speed)),
+        stage_cb=stages.append,
+    )
+
+    assert output.read_bytes() == b"fake video data"
+    assert result == {"output": str(output), "duration": 42.0}
+    assert stages == ["Copying"]
+    assert progress == [(1.0, "")]

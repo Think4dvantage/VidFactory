@@ -41,7 +41,7 @@
     return `
       <tr class="border-t border-slate-700/60">
         <td class="px-2 py-1"><a class="text-sky-300 hover:underline" href="/projects/${job.project_id}">Project #${job.project_id}</a></td>
-        <td class="px-2 py-1">${escapeHtml(job.kind)}</td>
+        <td class="px-2 py-1">${escapeHtml(job.kind)}${job.title ? ` <span class="text-slate-400">— ${escapeHtml(job.title)}</span>` : ""}</td>
         <td class="px-2 py-1"><span class="text-xs rounded px-2 py-0.5 ${statusClass}">${escapeHtml(statusLabel(job))}</span></td>
         <td class="px-2 py-1">
           <div class="flex items-center gap-2">
