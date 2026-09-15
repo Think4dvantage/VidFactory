@@ -73,10 +73,14 @@ deploy path.
 
 ## Status
 
-Live and healthy on `sdh` (`vf.lenti.cloud`). Shipped: concatenate → full flight, highlight editor
-(720p proxy + Flightlog timeline hints), summary + full-flight-with-music, shorts (highlight-driven
-+ random), chunked resumable upload, a file browser with downloads, multi-user accounts, Flightlog
-API integration, a public API-key integration contract for external tools, and a global build
-queue with live progress. **Next:** exact Summary-video chapter timestamps, and getting the
-external YouTube-management tool actually talking to `/api/integration/v1`. See
-`.ai/context/features.md` for the full milestone history and `.ai/` for full context.
+Live on `sdh` (`vf.lenti.cloud`), verified there as of `v0.4.8`: concatenate → full flight,
+highlight editor (720p proxy + Flightlog timeline hints), summary + full-flight-with-music, shorts
+(highlight-driven + random), chunked resumable upload, a file browser with downloads, multi-user
+accounts, Flightlog API integration, a public API-key integration contract for external tools, and
+a global build queue with live progress. This repo is tagged through `v0.4.17`, but everything past
+`v0.4.8` — picture-highlight upload, per-short job-queue rows, the Summary/Full-flight+music CTA
+end screen, and fixes to music-credit attribution and duplicate Shorts launch clips — is only
+verified locally, not yet redeployed. **Next:** redeploy the newer tags to `sdh`, exact
+Summary-video chapter timestamps, and getting the external YouTube-management tool actually
+talking to `/api/integration/v1`. See `.ai/context/features.md` for the full milestone history and
+`.ai/` for full context.

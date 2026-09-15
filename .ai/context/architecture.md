@@ -184,7 +184,7 @@ credits too without a rebuild.
 
 ---
 
-## API Contracts (implemented through M23)
+## API Contracts (implemented through M24 — M25–M27 didn't touch the API surface)
 
 Pages return HTML (`include_in_schema=False`); mutations mostly reply `204 + HX-Redirect`; FFmpeg
 builds return `{job_id}` and stream progress over SSE. Every route except `GET /health` and
