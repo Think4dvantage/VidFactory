@@ -442,6 +442,29 @@ document.getElementById('build-btn').addEventListener('click', async () => {
   followFullFlightBuild(btn, job_id);
 });
 
+// Saving a Flightlog id on a footage-less project triggers this when the flight already has a
+// "Full Flight" video on YouTube (see set_flightlog_id) -- the server sends HX-Trigger instead of
+// its usual redirect, so this page is responsible for the reload if the download is declined.
+document.body.addEventListener('vf-youtube-offer', async () => {
+  console.log('[VF:project] YouTube full flight found on Flightlog — offering download');
+  if (!confirm('This flight has its Full Flight on YouTube (per Flightlog). Download it at best quality (4K if available) to use here?')) {
+    location.reload();
+    return;
+  }
+  const btn = document.getElementById('build-btn');
+  btn.disabled = true;
+  const r = await fetch('/api/projects/{{ project.id }}/fullflight/download-youtube', { method: 'POST' });
+  if (!r.ok) {
+    let msg = await r.text();
+    try { msg = JSON.parse(msg).error.message; } catch (e) { /* not a JSON error body */ }
+    document.getElementById('build-result').textContent = '❌ ' + msg;
+    btn.disabled = false;
+    return;
+  }
+  const { job_id } = await r.json();
+  followFullFlightBuild(btn, job_id);
+});
+
 // Resume watching any build already running for this project -- e.g. after navigating away
 // and back. Without this, a still-running job looks identical to a page that was never used to
 // start one, which is exactly what leads to clicking "Build" a second time and corrupting the
@@ -461,7 +484,7 @@ document.getElementById('build-btn').addEventListener('click', async () => {
   const activeShorts = [];
   for (const job of jobs) {
     if (job.project_id !== {{ project.id }} || job.status !== 'running' && job.status !== 'pending') continue;
-    if (job.kind === 'concat') {
+    if (job.kind === 'concat' || job.kind === 'ytdownload') {
       followFullFlightBuild(document.getElementById('build-btn'), job.id);
       continue;
     }

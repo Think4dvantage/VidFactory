@@ -15,7 +15,7 @@ from vidfactory.api.templating import templates
 from vidfactory.config import get_config
 import re
 
-from vidfactory.core import chunked_upload, filebrowser, flightlog_hints, gpu_detector, highlights, music, projects, summary
+from vidfactory.core import chunked_upload, filebrowser, flightlog_hints, gpu_detector, highlights, music, projects, summary, youtube_download
 from vidfactory.core import shorts as shorts_engine
 from vidfactory.core.concat import build_preview, concatenate, hike_output_duration, plan as concat_plan
 from vidfactory.core.ffmpeg_runner import get_runner
@@ -259,7 +259,64 @@ async def set_flightlog_id(project_id: int, request: Request, db: Session = Depe
     form = await request.form()
     project.external_flight_id = str(form.get("external_flight_id") or "").strip() or None
     db.commit()
+    # Best-effort: if this flight already has its full flight on YouTube (a Flightlog link
+    # labelled "Full Flight") and the project has no footage yet, tell the page to offer the
+    # download instead of redirecting. The URL itself is not sent -- the download endpoint
+    # re-resolves it server-side.
+    if (
+        project.external_flight_id
+        and _can_offer_youtube_download(project)
+        and youtube_download.resolve_fullflight_url(project)
+    ):
+        logger.info("[VF:projects] project=%s flight=%s has a YouTube full flight — offering download",
+                    project_id, project.external_flight_id)
+        return Response(status_code=204, headers={"HX-Trigger": "vf-youtube-offer"})
     return _redirect(project_id)
+
+
+def _can_offer_youtube_download(project: Project) -> bool:
+    return not project.full_flight_file and not project.source_parts
+
+
+@router.post("/api/projects/{project_id}/fullflight/download-youtube", include_in_schema=False)
+def download_youtube_fullflight(project_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    project = projects.get_owned_project(db, project_id, user.id)
+    if project is None:
+        return Response(status_code=404)
+    if not _can_offer_youtube_download(project):
+        return _error(409, "HAS_FOOTAGE", "This project already has a full flight or source parts.")
+    if registry.find_active("ytdownload", project_id) or registry.find_active("concat", project_id):
+        return _build_conflict("download")
+    url = youtube_download.resolve_fullflight_url(project)
+    if url is None:
+        return _error(404, "NO_YOUTUBE_FULLFLIGHT", "No YouTube link labelled \"Full Flight\" found on this flight in Flightlog.")
+    job = registry.run("ytdownload", user.id, _ytdownload_target(project_id, user.id, url), project_id=project_id)
+    return {"job_id": job.id}
+
+
+def _error(status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, "details": {}}})
+
+
+def _ytdownload_target(project_id: int, owner_id: int, url: str):
+    def target(job):
+        with Session(get_engine()) as db:
+            project = projects.get_owned_project(db, project_id, owner_id)
+            out = projects.fullflight_output_path(project)
+            try:
+                youtube_download.download(
+                    url, out, ffmpeg_path=get_config().ffmpeg.ffmpeg_path,
+                    progress_cb=job.set_progress, stage_cb=job.set_stage, cancel_event=job.cancel_event,
+                )
+            except youtube_download.DownloadCancelled:
+                logger.info("Job [ytdownload] %s cancelled — project=%s", job.id, project_id)
+                return None
+            project.full_flight_file = out
+            db.commit()
+            registry.run("preview", owner_id, _preview_target(project_id, owner_id), project_id=project_id)
+            return out
+
+    return target
 
 
 @router.post("/api/projects/{project_id}/pilot-name", include_in_schema=False)
