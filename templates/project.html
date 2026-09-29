@@ -429,16 +429,18 @@ function followFullFlightBuild(btn, jobId) {
       btn.disabled = false;
     }
     if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
+    if (d.status === 'cancelled') { document.getElementById('build-result').textContent = 'Cancelled'; btn.disabled = false; }
   });
 }
 
 document.getElementById('build-btn').addEventListener('click', async () => {
   const btn = document.getElementById('build-btn');
   btn.disabled = true;
-  console.log('[VF:project] build requested');
+  console.log('[VF:project] POST /api/projects/{{ project.id }}/build (full flight from source parts)');
   const r = await fetch('/api/projects/{{ project.id }}/build', { method: 'POST' });
-  if (!r.ok) { document.getElementById('build-result').textContent = '❌ ' + (await r.text()); btn.disabled = false; return; }
+  if (!r.ok) { const t = await r.text(); console.error(`[VF:project] full flight build request failed: HTTP ${r.status}`, t); document.getElementById('build-result').textContent = '❌ ' + t; btn.disabled = false; return; }
   const { job_id } = await r.json();
+  console.log(`[VF:project] full flight build queued — job ${job_id}`);
   followFullFlightBuild(btn, job_id);
 });
 
@@ -448,20 +450,24 @@ document.getElementById('build-btn').addEventListener('click', async () => {
 document.body.addEventListener('vf-youtube-offer', async () => {
   console.log('[VF:project] YouTube full flight found on Flightlog — offering download');
   if (!confirm('This flight has its Full Flight on YouTube (per Flightlog). Download it at best quality (4K if available) to use here?')) {
+    console.log('[VF:project] YouTube download declined — reloading');
     location.reload();
     return;
   }
   const btn = document.getElementById('build-btn');
   btn.disabled = true;
+  console.log('[VF:project] POST /api/projects/{{ project.id }}/fullflight/download-youtube');
   const r = await fetch('/api/projects/{{ project.id }}/fullflight/download-youtube', { method: 'POST' });
   if (!r.ok) {
     let msg = await r.text();
+    console.error(`[VF:project] YouTube download request failed: HTTP ${r.status}`, msg);
     try { msg = JSON.parse(msg).error.message; } catch (e) { /* not a JSON error body */ }
     document.getElementById('build-result').textContent = '❌ ' + msg;
     btn.disabled = false;
     return;
   }
   const { job_id } = await r.json();
+  console.log(`[VF:project] YouTube download queued — job ${job_id}; server log: "Job [ytdownload]"`);
   followFullFlightBuild(btn, job_id);
 });
 

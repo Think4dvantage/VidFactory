@@ -43,6 +43,11 @@ def test_youtube_metadata_404(auth_client):
 
 ## Frontend: Playwright
 
+> **Not set up yet:** `tests/frontend/` does not exist and Playwright is not a dependency. UI
+> behaviour (e.g. the M28 `vf-youtube-offer` confirm flow, the editor, upload progress) is
+> currently verified only manually / via `TestClient` checks of the served HTML. The below is the
+> intended approach if/when it is added.
+
 Because this project uses a "no-build" server-rendered frontend (Jinja + HTMX), we use `Playwright` for End-to-End (E2E) testing. This is the most reliable way to test that the UI behaves correctly in real browsers — especially the highlight editor and live job-progress flows.
 
 ### Location
@@ -69,6 +74,8 @@ def test_login_page_renders(page: Page):
 
 ## CI / Automation
 
-- All tests should run automatically on every Pull Request via GitHub Actions.
-- Ensure the test suite is "green" before merging any new feature or fix.
+- **Current reality:** no CI runs `pytest`. `.github/workflows/docker-publish.yml` builds and pushes
+  an image on every `v*` tag with no test step, so the suite is run locally
+  (`PYTHONPATH=src python -m pytest tests/backend`) before tagging.
+- Target: run the suite on every PR via GitHub Actions and gate `docker-publish` on it.
 - **Coverage**: Aim for 80%+ coverage, but prioritize critical paths (highlight dedup/auto-fill, FFmpeg arg construction, `UsedMap` short de-dup, auth/ownership scoping, Flightlog client error-envelope handling, API contracts).

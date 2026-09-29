@@ -390,7 +390,7 @@ mechanism itself is untouched and still serves `music` (see `## API Contracts` �
 which was already local-only in the standalone deploy and unaffected by the NAS being gone.
 
 **Standalone deploy (M1b)** — `docker-compose.standalone.yml`, for running fully independently of
-the NAS/Traefik/`xpsex` while the real deploy host is TBD (see Deployment below). It bind-mounts two
+the NAS/Traefik/`xpsex` (that host is retired; the real deploy host is `sdh` — see Deployment below). It bind-mounts two
 host folders instead of `/data`: `VF_MUSIC_HOST` (read-only, folder mode for `music.py`) → `VF_MUSIC`,
 and `VF_LIBRARY_HOST` → the four write roots (`VF_OUTPUT_FULLFLIGHTS/SUMMARIES/SHORTS`, `VF_ARCHIVE`)
 as subfolders, so finished output lands on a real host path instead of a docker volume. `VF_VIDEOS` is

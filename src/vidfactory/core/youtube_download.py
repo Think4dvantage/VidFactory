@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
@@ -33,6 +34,24 @@ _FORMAT = "bv*+ba/b"
 
 class DownloadCancelled(Exception):
     pass
+
+
+class _YtdlpLogger:
+    """Routes yt-dlp's own output into our logs so an operator can see what it picked (format
+    ids, resolution) and what went wrong. Its per-tick "[download]" progress lines are dropped."""
+
+    def debug(self, msg: str) -> None:
+        if msg.startswith("[download]"):
+            return
+        logger.info("[VF:youtube_download] yt-dlp: %s", msg)
+
+    info = debug
+
+    def warning(self, msg: str) -> None:
+        logger.warning("[VF:youtube_download] yt-dlp: %s", msg)
+
+    def error(self, msg: str) -> None:
+        logger.error("[VF:youtube_download] yt-dlp: %s", msg)
 
 
 def _is_youtube(url: str) -> bool:
@@ -81,6 +100,12 @@ def download(
     """Download `url` to `output` (an .mp4 path). Raises on failure or cancel."""
     import yt_dlp  # lazy: only this feature needs it
 
+    # yt-dlp wants a real path (or dir), not a bare command name it would have to look up on
+    # PATH itself -- with the default "ffmpeg" it reports "ffmpeg is not installed" even when it is.
+    ffmpeg = shutil.which(ffmpeg_path)
+    if ffmpeg is None:
+        raise RuntimeError(f"ffmpeg not found (configured ffmpeg_path={ffmpeg_path!r}, not on PATH)")
+
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -96,14 +121,15 @@ def download(
         "format": _FORMAT,
         "merge_output_format": "mp4",
         "outtmpl": str(out.with_suffix("")) + ".%(ext)s",
-        "ffmpeg_location": ffmpeg_path,
+        "ffmpeg_location": ffmpeg,
         "noplaylist": True,
         "overwrites": True,
-        "quiet": True,
-        "no_warnings": True,
+        "logger": _YtdlpLogger(),
         "progress_hooks": [hook],
     }
-    logger.info("Job [ytdownload] yt-dlp — url=%s format=%s -> %s", url, _FORMAT, output)
+    logger.info(
+        "Job [ytdownload] starting — url=%s format=%s ffmpeg=%s -> %s", url, _FORMAT, ffmpeg, output
+    )
     if stage_cb:
         stage_cb("Downloading from YouTube")
     try:
@@ -115,6 +141,7 @@ def download(
     except yt_dlp.utils.DownloadError as exc:
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadCancelled() from exc
+        logger.error("Job [ytdownload] yt-dlp failed — url=%s output=%s: %s", url, output, exc)
         raise
     if not out.exists():
         raise RuntimeError(f"yt-dlp finished but {output} was not produced")

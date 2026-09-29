@@ -45,16 +45,28 @@ document.addEventListener("click", (ev) => {
 window.VF.followJob = function (jobId, onUpdate) {
   console.log(`[VF:jobs] following job ${jobId}`);
   const es = new EventSource(`/events/${jobId}`);
+  let lastStatus = null, lastStage = null, lastDecile = -1;
   es.addEventListener("progress", (ev) => {
     const data = JSON.parse(ev.data);
+    // Log transitions only (status / stage / each 10% step), not every tick.
+    const decile = Math.floor((data.percent || 0) / 10);
+    if (data.status !== lastStatus || data.stage !== lastStage || decile !== lastDecile) {
+      console.log(`[VF:jobs] job ${jobId} ${data.kind || ""} status=${data.status} stage="${data.stage || ""}" ` +
+        `${Math.round(data.percent || 0)}%` + (data.status === "pending" ? ` queue_position=${data.queue_position}` : ""));
+      lastStatus = data.status; lastStage = data.stage; lastDecile = decile;
+    }
     onUpdate(data);
     if (["done", "error", "cancelled"].includes(data.status)) {
-      console.log(`[VF:jobs] job ${jobId} ${data.status}`);
+      if (data.status === "error") {
+        console.error(`[VF:jobs] job ${jobId} FAILED: ${data.message || "(no message)"}`, data);
+      } else {
+        console.log(`[VF:jobs] job ${jobId} ${data.status}`, data);
+      }
       es.close();
     }
   });
-  es.addEventListener("error", () => {
-    console.error(`[VF:jobs] SSE error for job ${jobId}`);
+  es.addEventListener("error", (ev) => {
+    console.error(`[VF:jobs] SSE connection error for job ${jobId} (readyState=${es.readyState}) — the job may still be running server-side; check /jobs`, ev);
     es.close();
   });
   return es;

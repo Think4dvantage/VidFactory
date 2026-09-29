@@ -1,9 +1,9 @@
 # Frontend Conventions
 
 VidFactory's UI is **server-rendered**: the backend does the work and ships HTML. This fits the actual
-functions — a server-side file browser, flight-log tables/forms, multi-step FFmpeg jobs with live
-progress, and one interactive screen (the highlight editor). Single operator, so **no i18n and no
-in-app auth** (access is gated at the lg4.ch reverse proxy).
+functions — a server-side file browser, project forms, multi-step FFmpeg jobs with live
+progress, and one interactive screen (the highlight editor). **No i18n.** Auth is in-app
+(session cookie, two users max — see `features.md` M5b); pages are gated by `require_user`.
 
 ## Stack (no build step)
 
@@ -12,7 +12,7 @@ in-app auth** (access is gated at the lg4.ch reverse proxy).
 | Templating | Jinja2 (FastAPI `Jinja2Templates`) | server |
 | Interactions (forms, tables, navigation, file browser) | **HTMX** | CDN `<script>` |
 | Styling | **Tailwind** | CDN `<script>` (Play CDN; no PostCSS/npm) |
-| Local interactivity (highlight editor only) | **Alpine.js** + a small vanilla-JS module | CDN + `static/editor.js` |
+| Local interactivity (highlight editor only) | small vanilla-JS module (`static/editor.js`); Alpine.js is loaded in `base.html` but currently unused | `static/` (+ CDN tag) |
 | Live job progress | **SSE** via `EventSource` | browser native |
 
 **Never introduce npm, a bundler, or a build step.** Everything is a CDN tag or a plain `static/*.js`
@@ -47,8 +47,10 @@ it isolated in `static/editor.js` (an ES module) + Alpine for local state:
 ## Live Job Progress (SSE)
 
 FFmpeg runs are background jobs. Subscribe with `EventSource` to `/events/{job_id}` and update a
-progress bar + stage label from the streamed `{stage, percent, speed, eta}`. Job state is persisted
-server-side, so reconnecting after a refresh (or from another device) resumes the live view.
+progress bar + stage label from the streamed `{stage, percent, speed, status, result,
+elapsed_seconds, queue_position}` (shared helper `window.VF.followJob` in `static/app.js`). Jobs are
+queued globally, so a job can sit `pending` ("queued — N ahead"). The project page re-attaches to
+in-flight jobs on load (`resumeActiveJobs`); `/jobs` lists everything.
 
 ---
 

@@ -144,6 +144,18 @@ def test_download_endpoint_conflicts_with_active_job(auth_client, db_session, us
     assert r.status_code == 409 and r.json()["error"]["code"] == "CONFLICT"
 
 
+@pytest.fixture(autouse=True)
+def _ffmpeg_on_path(monkeypatch):
+    monkeypatch.setattr(youtube_download.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+
+def test_download_fails_clearly_without_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(youtube_download.shutil, "which", lambda name: None)
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", SimpleNamespace())
+    with pytest.raises(RuntimeError, match="ffmpeg not found"):
+        youtube_download.download(YT, str(tmp_path / "o.mp4"), ffmpeg_path="ffmpeg")
+
+
 def test_download_passes_best_quality_options(tmp_path, monkeypatch):
     captured = {}
 
@@ -166,6 +178,7 @@ def test_download_passes_best_quality_options(tmp_path, monkeypatch):
     res = youtube_download.download(YT, str(tmp_path / "out.mp4"), ffmpeg_path="ffmpeg")
     assert res["output"] == str(tmp_path / "out.mp4")
     assert captured["urls"] == [YT]
+    assert captured["opts"]["ffmpeg_location"] == "/usr/bin/ffmpeg"  # resolved, not the bare name
     assert captured["opts"]["format"] == "bv*+ba/b"
     assert captured["opts"]["merge_output_format"] == "mp4"
     assert captured["opts"]["outtmpl"] == str(tmp_path / "out") + ".%(ext)s"

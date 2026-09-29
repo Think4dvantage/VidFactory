@@ -50,9 +50,10 @@ When an error occurs, the API must return a standardized error object. This is l
 ### Common Error Codes
 - `ENTITY_NOT_FOUND`: Resource with the given ID does not exist.
 - `VALIDATION_FAILED`: Request payload is invalid (Pydantic error).
-- `CONFLICT`: Resource already exists or version mismatch.
+- `CONFLICT`: A build of the same kind is already running for the project (409).
+- `HAS_FOOTAGE` / `NO_YOUTUBE_FULLFLIGHT`: M28 YouTube-download refusals (409 / 404).
 - `PATH_NOT_ALLOWED`: A file-browser path escaped the configured mount roots.
-- `MOUNT_UNAVAILABLE`: A required NAS mount root is missing or not writable.
+- `MOUNT_UNAVAILABLE`: A required storage root (music/output/archive) is missing or not writable.
 - `FFMPEG_FAILED`: An encode/probe subprocess exited non-zero (include the failing command in `details`).
 - `INTERNAL_ERROR`: Unexpected server-side failure.
 
@@ -77,9 +78,9 @@ When an error occurs, the API must return a standardized error object. This is l
 | **201 Created** | Successful resource creation. |
 | **400 Bad Request** | Validation failed or bad logic (e.g., disallowed path, negative duration). |
 | **404 Not Found** | Resource ID is invalid or missing. |
-| **409 Conflict** | Resource with this key already exists. |
+| **409 Conflict** | Same-kind build already running, or the request conflicts with current state (e.g. project already has footage). |
 | **500 Internal Error** | Database lock, FFmpeg failure, logic bug, or unexpected exception. |
-| **503 Service Unavailable** | A required NAS mount is unavailable (see `/health`). |
+| **503 Service Unavailable** | The database is unreachable (`/health`). A missing storage root only reports `degraded` with HTTP 200. |
 
 ---
 
