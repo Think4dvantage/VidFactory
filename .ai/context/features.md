@@ -1,6 +1,6 @@
 # Feature History & Backlog
 
-## Current Version: pre-v0.1 (M0–M28 shipped in repo; M0–M4 verified live at the old vf-dev.lg4.ch, M5a–M13 verified live on `sdh` as of 2026-08-21 (`v0.4.8`) — see Host migration below; M14–M27 verified locally only, not yet deployed; M16–M19 deployed to `sdh` 2026-08-21 per the user, M20–M27 not yet)
+## Current Version: pre-v0.1 (M0–M28 shipped in repo; M0–M4 verified live at the old vf-dev.lg4.ch, M5a–M13 verified live on `sdh` as of 2026-08-21 (`v0.4.8`) — see Host migration below; M14–M28 verified locally only, not yet deployed; M16–M19 deployed to `sdh` 2026-08-21 per the user, M20–M28 not yet; repo tagged `v0.4.18`)
 
 > **M0–M4** were deployed via `scripts/VF-dev.ps1 deploy` (SSH alias `xpsex` → `/opt/VidFactory`)
 > and verified live on that host, on git branch `m0-foundation` (local-only at the time).
@@ -106,6 +106,7 @@
 - **Speech-AI auto-highlights** (Whisper + Silero VAD) — port `PS_VidAggregator/SpeechSegmentExtractor.ps1`;
   optional deps. Use case: a 3 h flight where only the spoken segments should be exposed.
 - **YTChannelMgmt-side reader** for the `metadata.json` handoff (lands in that repo).
+- **Full flight + music on YouTube-downloaded (VP9/AV1) files** — the CTA `-c copy` join assumes matching codecs (M28 known limit).
 - **Multi-device / job-resume polish** — confirm a running job is visible from a second device after refresh.
 - **Linux/Fedora hardening** — reverse-proxy auth (Pocket-ID), backups of the SQLite DB on `Archive/`.
 

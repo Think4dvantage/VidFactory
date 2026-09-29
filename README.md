@@ -16,6 +16,9 @@ app.
 - **Upload** source footage — chunked, resumable (8 MiB chunks; survives a laptop sleep, a network
   drop, even a container restart mid-upload). The only way in: there's no NAS browsing any more,
   the home NAS this app originally read from has been unreachable since a 2026 move.
+- **Import a full flight from YouTube** — if the flight's Flightlog entry has a link labelled
+  "Full Flight" pointing at YouTube, saving the Flightlog id on a footage-less project offers to
+  download it (best quality, 4K if available) instead of uploading anything.
 - **Concatenate** source parts → full flight (sped-up hike prepended for Hike & Fly); a 720p proxy
   is built alongside it for smooth scrubbing in the highlight editor.
 - **Summary** — mark named highlights, auto-fill to a target length, mix background music, write
@@ -42,7 +45,7 @@ app.
 
 ## Stack
 
-Python 3.11 · FastAPI · SQLite/SQLAlchemy · FFmpeg (subprocess, NVENC→QSV→libx264, currently
+Python 3.11 · FastAPI · SQLite/SQLAlchemy · FFmpeg + yt-dlp (subprocess/lib, NVENC→QSV→libx264, currently
 running Intel QSV) · Jinja2 + HTMX + Tailwind. Packaged as a Docker container.
 
 ## Deploying (from another project)
@@ -77,10 +80,13 @@ Live on `sdh` (`vf.lenti.cloud`), verified there as of `v0.4.8`: concatenate →
 highlight editor (720p proxy + Flightlog timeline hints), summary + full-flight-with-music, shorts
 (highlight-driven + random), chunked resumable upload, a file browser with downloads, multi-user
 accounts, Flightlog API integration, a public API-key integration contract for external tools, and
-a global build queue with live progress. This repo is tagged through `v0.4.17`, but everything past
+a global build queue with live progress. This repo is tagged through `v0.4.18`, but everything past
 `v0.4.8` — picture-highlight upload, per-short job-queue rows, the Summary/Full-flight+music CTA
-end screen, and fixes to music-credit attribution and duplicate Shorts launch clips — is only
-verified locally, not yet redeployed. **Next:** redeploy the newer tags to `sdh`, exact
+end screen, fixes to music-credit attribution and duplicate Shorts launch clips, and downloading
+a full flight from YouTube via its Flightlog link — is only verified locally, not yet redeployed.
+The YouTube download has never run for real (needs a host with outbound access; `yt-dlp` may
+need a JS runtime or cookies there), and *Full flight + music* on a downloaded 4K file is
+unsupported (VP9/AV1 vs. the H.264 CTA join). **Next:** redeploy the newer tags to `sdh`, exact
 Summary-video chapter timestamps, and getting the external YouTube-management tool actually
 talking to `/api/integration/v1`. See `.ai/context/features.md` for the full milestone history and
 `.ai/` for full context.

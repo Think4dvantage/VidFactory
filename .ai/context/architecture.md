@@ -184,7 +184,7 @@ credits too without a rebuild.
 
 ---
 
-## API Contracts (implemented through M24 — M25–M27 didn't touch the API surface)
+## API Contracts (implemented through M28 — M25–M27 didn't touch the API surface)
 
 Pages return HTML (`include_in_schema=False`); mutations mostly reply `204 + HX-Redirect`; FFmpeg
 builds return `{job_id}` and stream progress over SSE. Every route except `GET /health` and
@@ -238,7 +238,7 @@ hand), that row is deleted from the DB and dropped from the list, not just hidde
 Same on-demand-`Path.exists()` pattern `fullflight_video`/`editor_page` already use for
 `preview_file`/`full_flight_file`, just with an actual delete since a `Short` is a disposable
 generation record, not a source asset) · `GET /projects/{id}/editor` page ·
-flight-type/`flightlog-id`/parts(upload,move,delete)/hike(`upload`,`remove`) mutations ·
+flight-type/`flightlog-id` (**M28:** answers `HX-Trigger: vf-youtube-offer` instead of `HX-Redirect` when the footage-less project's flight has a YouTube "Full Flight" link)/parts(upload,move,delete)/hike(`upload`,`remove`) mutations ·
 **source upload (M11, `core/chunked_upload.py`)** — no longer a single multipart request (a 30-min
 Traefik entrypoint `readTimeout` kills any request that takes longer, which any real flight video
 does on home upload bandwidth); the client instead splits the file into 8 MiB chunks and calls three
@@ -272,7 +272,9 @@ builds: `POST /api/projects/{id}/{build,preview/build,summary/build,fullmusic/bu
 each returning `{"job_id": ...}` **except `shorts/build`**, which since **M24** returns
 `{"job_ids": [...]}` — one per short queued in the batch, so the caller (and the Job Queue page)
 can see how many videos are actually being produced instead of one opaque job ·
-`GET /api/projects/{id}/status`.
+`GET /api/projects/{id}/status` · **M28:** `POST /api/projects/{id}/fullflight/download-youtube` → `{"job_id"}` (kind `ytdownload`; 409 `HAS_FOOTAGE` if a full flight/source parts exist, 409 `CONFLICT` if a download/concat is active, 404 `NO_YOUTUBE_FULLFLIGHT` if Flightlog has no matching link).
+
+**YouTube full-flight download (M28, `core/youtube_download.py`):** `find_fullflight_url()` picks the first Flightlog `links` entry whose label matches `full[\s_-]*flight` (case-insensitive) and whose host is `youtube.com`/`youtu.be`; `resolve_fullflight_url()` is best-effort like the other Flightlog enrichments (no key/flight id/outage → `None`). The URL is never client-supplied or stored (no migration) — re-resolved server-side on each call. `download()` uses the `yt-dlp` Python API, format `bv*+ba/b`, `merge_output_format=mp4`, output = `fullflight_output_path`; cancel via `cancel_event` checked in the progress hook. After it, `full_flight_file` is set and the 720p `preview` job is queued exactly like after a concat. Limit: YouTube 4K is VP9/AV1, so `build_fullflight_with_music`'s `-c copy` join with its H.264 CTA is unsupported on such files.
 
 **sse** — `GET /events/{job_id}` (EventSource: `{stage,percent,speed,status,result,elapsed_seconds,
 queue_position}`) · `GET /api/jobs` · `POST /api/jobs/{id}/cancel` · `GET /jobs` (**M17**: the
@@ -402,7 +404,7 @@ compose+env only. `.env.example` documents the two host-path vars (compose auto-
 
 **This repo does not deploy itself.** It produces three things for whatever project/host actually
 runs the container: the image (built + pushed to GHCR by `.github/workflows/docker-publish.yml` on
-every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, currently `v0.4.3`), and
+every `v*` tag — `ghcr.io/think4dvantage/vidfactory:latest` and `:vX.Y.Z`, latest tag `v0.4.18`), and
 two example config files to copy over — `docker-compose.standalone.yml` and `.env.example`
 (alongside the existing `config.yml.example`). The actual deploy target — the shared docker host at
 SSH alias `sdh` (55 TB pooled storage, GPU = dedicated Intel card, QSV via `/dev/dri`; NVIDIA CDI
@@ -415,7 +417,7 @@ real `sdh` compose file adds its own Traefik labels on top, see below). See "Sta
 
 **Repo/CI state:** on GitHub at `Think4dvantage/VidFactory`, branch `main` (pushed — not the old
 local-only `m0-foundation` branch `features.md`'s deploy blockquote used to describe). Tags
-`v0.2.0`–`v0.4.3` so far, each auto-publishing the image on push.
+`v0.2.0`–`v0.4.18` so far, each auto-publishing the image on push.
 
 **Host migration has happened (found 2026-08-19, not yet reflected anywhere else in these docs
 before now).** `xpsex`/`lg4.ch` are dead and irrelevant — the app is live on a **different** shared
