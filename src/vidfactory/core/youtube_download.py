@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
@@ -30,6 +31,19 @@ _LABEL_RE = re.compile(r"full[\s_-]*flight", re.IGNORECASE)
 # Best video + best audio, whatever YouTube offers (4K when available) -- remuxed to mp4, never
 # re-encoded.
 _FORMAT = "bv*+ba/b"
+
+
+# yt-dlp's own retries (below) cover network hiccups and 5xx, but its downloader raises any 4xx
+# straight away -- and a mid-download 403 on a multi-GB file is what YouTube's media servers
+# actually do (seen live on the first 20 GB attempt). So a failed attempt is retried here with a
+# fresh extraction (new signed URL); the .part files from the previous attempt are resumed.
+_ATTEMPTS = 4
+_BACKOFF_S = 5.0
+_HTTP_ERROR_RE = re.compile(r"HTTP Error \d{3}")
+
+# 10 MiB range requests instead of one multi-GB stream: less exposed to throttling / a single
+# rejected response, and each chunk is an independent request.
+_CHUNK_SIZE = 10 * 1024 * 1024
 
 
 class DownloadCancelled(Exception):
@@ -117,32 +131,73 @@ def download(
             if total:
                 progress_cb(min(d.get("downloaded_bytes", 0) / total, 0.99), d.get("_speed_str", "").strip())
 
+    def pp_hook(d: dict) -> None:
+        # The video+audio merge (ffmpeg, no progress reporting) of a multi-GB download takes a
+        # while; without a stage the bar just sits at 99% and looks stuck.
+        if d.get("postprocessor") != "Merger":
+            return
+        if d.get("status") == "started":
+            logger.info("Job [ytdownload] merging video+audio with ffmpeg — %s", output)
+            if stage_cb:
+                stage_cb("Merging video+audio (ffmpeg)")
+        elif d.get("status") == "finished":
+            logger.info("Job [ytdownload] merge finished — %s", output)
+
     opts = {
         "format": _FORMAT,
         "merge_output_format": "mp4",
         "outtmpl": str(out.with_suffix("")) + ".%(ext)s",
         "ffmpeg_location": ffmpeg,
         "noplaylist": True,
-        "overwrites": True,
+        # Not overwriting keeps a finished video/audio stream (or a finished output) from a
+        # previous attempt instead of deleting and re-downloading it; partial .part files resume
+        # regardless (continuedl defaults on).
+        "overwrites": False,
+        "retries": 10,
+        "fragment_retries": 10,
+        "extractor_retries": 3,
+        "file_access_retries": 3,
+        "http_chunk_size": _CHUNK_SIZE,
         "logger": _YtdlpLogger(),
         "progress_hooks": [hook],
+        "postprocessor_hooks": [pp_hook],
     }
     logger.info(
         "Job [ytdownload] starting — url=%s format=%s ffmpeg=%s -> %s", url, _FORMAT, ffmpeg, output
     )
     if stage_cb:
         stage_cb("Downloading from YouTube")
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
-    except DownloadCancelled:
-        out.unlink(missing_ok=True)
-        raise
-    except yt_dlp.utils.DownloadError as exc:
-        if cancel_event is not None and cancel_event.is_set():
-            raise DownloadCancelled() from exc
-        logger.error("Job [ytdownload] yt-dlp failed — url=%s output=%s: %s", url, output, exc)
-        raise
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            break
+        except DownloadCancelled:
+            raise
+        except yt_dlp.utils.DownloadError as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                raise DownloadCancelled() from exc
+            transient = bool(_HTTP_ERROR_RE.search(str(exc)))
+            if not transient or attempt == _ATTEMPTS:
+                logger.error(
+                    "Job [ytdownload] yt-dlp failed — attempt %d/%d url=%s output=%s: %s",
+                    attempt, _ATTEMPTS, url, output, exc,
+                )
+                raise
+            delay = _BACKOFF_S * attempt
+            logger.warning(
+                "Job [ytdownload] attempt %d/%d failed (%s) — retrying in %.0fs with a fresh URL, "
+                "resuming partial files", attempt, _ATTEMPTS, exc, delay,
+            )
+            if stage_cb:
+                stage_cb(f"Retrying download ({attempt + 1}/{_ATTEMPTS})")
+            if cancel_event is not None:
+                if cancel_event.wait(delay):
+                    raise DownloadCancelled() from exc
+            else:
+                time.sleep(delay)
+            if stage_cb:
+                stage_cb("Downloading from YouTube")
     if not out.exists():
         raise RuntimeError(f"yt-dlp finished but {output} was not produced")
     logger.info("Job [ytdownload] done — %s (%d bytes)", output, out.stat().st_size)

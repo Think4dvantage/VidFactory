@@ -45,7 +45,8 @@ def make_shorts_setup(tmp_path, monkeypatch):
     each test, parametrized on `flight_type` and `launch_start` so no test needs a second DB
     session to mutate state the first session already holds open."""
 
-    def _make(flight_type: str = "hike_and_fly", launch_start: float = 125.0):
+    def _make(flight_type: str = "hike_and_fly", launch_start: float = 125.0,
+              no_use: tuple[float, float] | None = None):
         engine = create_engine(
             "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
         )
@@ -71,6 +72,9 @@ def make_shorts_setup(tmp_path, monkeypatch):
         db.add(Highlight(project_id=project.id, name="launch", start=launch_start,
                           end=launch_start + 5.0, role="launch"))
         db.add(Highlight(project_id=project.id, name="landing", start=395.0, end=400.0, role="landing"))
+        if no_use:
+            db.add(Highlight(project_id=project.id, name="boring", start=no_use[0], end=no_use[1],
+                              role="no_use"))
         db.commit()
         project_id = project.id
 
@@ -246,3 +250,49 @@ def test_build_shorts_highlight_mode_400s_when_none_flagged(auth_client, db_sess
 
     resp = auth_client.post(f"/api/projects/{project.id}/shorts/build", data={"mode": "highlight"})
     assert resp.status_code == 400
+
+
+# --- 'no_use' highlights: random hike/flying picks stay out of them ---
+
+
+def test_flying_clips_avoid_no_use_ranges(make_shorts_setup):
+    project_id, owner_id, job, captured = make_shorts_setup(
+        flight_type="normal_flight", no_use=(0.0, 340.0),
+    )
+
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (200.0, 206.0), "Ridge soaring", None, {},
+    )
+    target(job)
+
+    hook, launch, *flying, landing = captured[0]
+    assert len(flying) == 3
+    for s, e in flying:
+        assert s >= 340.0 and e <= 400.0  # only the un-flagged tail was eligible
+
+
+def test_hike_clips_avoid_no_use_ranges(make_shorts_setup):
+    project_id, owner_id, job, captured = make_shorts_setup(no_use=(0.0, 90.0))
+
+    target = projects_router._short_target(
+        project_id, owner_id, "highlight", "", 0.35, 1.0, (200.0, 206.0), "Ridge soaring", None, {},
+    )
+    target(job)
+
+    hike1, hike2 = captured[0][1:3]
+    for s, e in (hike1, hike2):
+        assert s >= 90.0 and e <= 120.0
+
+
+def test_build_shorts_skips_no_use_highlight_even_if_flagged_make_short(auth_client, db_session, user):
+    project = Project(owner_id=user.id, flight_type="normal_flight", full_flight_file="/full.mp4")
+    db_session.add(project)
+    db_session.commit()
+    db_session.add(Highlight(project_id=project.id, name="Takeoff", start=10.0, end=20.0, make_short=True))
+    db_session.add(Highlight(project_id=project.id, name="Boring", start=100.0, end=110.0,
+                              make_short=True, role="no_use"))
+    db_session.commit()
+
+    resp = auth_client.post(f"/api/projects/{project.id}/shorts/build", data={"mode": "highlight"})
+    assert resp.status_code == 200
+    assert [registry.get(j).title for j in resp.json()["job_ids"]] == ["Takeoff"]

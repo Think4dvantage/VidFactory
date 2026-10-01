@@ -52,12 +52,23 @@ def delete_highlight(db: Session, highlight_id: int) -> bool:
     return True
 
 
+NO_USE = "no_use"
+
+
+def no_use_ranges(highlights: list[Highlight]) -> list[tuple[float, float]]:
+    """Ranges flagged 'do not use for publication' -- a negative highlight that Summary
+    auto-fill and the random Shorts pools must stay out of."""
+    return [(h.start, h.end) for h in highlights if h.role == NO_USE and h.type == "video"]
+
+
 def merge_overlaps(highlights: list[Highlight]) -> list[dict]:
     """Sort video highlights by start and merge overlapping/adjacent ranges.
 
-    Picture highlights are point inserts and are passed through unchanged. Returns plain dicts
-    so callers (the summary engine) don't depend on ORM identity.
+    Picture highlights are point inserts and are passed through unchanged. 'no_use' highlights
+    are never content, so they're skipped. Returns plain dicts so callers (the summary engine)
+    don't depend on ORM identity.
     """
+    highlights = [h for h in highlights if h.role != NO_USE]
     videos = sorted(
         (h for h in highlights if h.type == "video"), key=lambda h: (h.start, h.end)
     )

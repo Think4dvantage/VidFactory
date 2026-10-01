@@ -17,6 +17,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vidfactory.config import get_config
 from vidfactory.core.ffmpeg_runner import FFmpegRunner
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,19 @@ AUDIO_EXT = {".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"}
 class MusicSelection:
     mode: str  # 'file' | 'folder' | 'none'
     tracks: list[str] = field(default_factory=list)
+
+
+def original_audio_filter(volume: float) -> str:
+    """Filter chain for the flight's own audio when it is mixed under music: quiet passages are
+    pushed down (`agate` with a soft `range`, not a hard mute), so wind, voices and the vario
+    stay faintly audible in the background and only come through at full `volume` on peaks."""
+    m = get_config().music
+    if not m.original_audio_gate:
+        return f"volume={volume}"
+    return (
+        f"agate=threshold={m.original_audio_gate_threshold}:ratio=3:range={m.original_audio_gate_range}"
+        f":attack=20:release=250,volume={volume}"
+    )
 
 
 def _folder_cache_file(folder: Path, cache_dir: Path) -> Path:

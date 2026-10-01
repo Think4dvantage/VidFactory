@@ -34,8 +34,13 @@ class EncodeSection(BaseModel):
 
 
 class MusicSection(BaseModel):
-    music_volume: float = 0.35
-    original_audio_volume: float = 1.0
+    # Music leads; the flight's own sound (voices, wind, vario) sits faint underneath and only
+    # comes through on peaks -- see core/music.original_audio_filter.
+    music_volume: float = 0.8
+    original_audio_volume: float = 0.4
+    original_audio_gate: bool = True
+    original_audio_gate_threshold: float = 0.08   # linear level above which sound counts as a "peak"
+    original_audio_gate_range: float = 0.25       # gain applied to everything below it (0.25 = -12 dB)
 
 
 class FlightlogSection(BaseModel):

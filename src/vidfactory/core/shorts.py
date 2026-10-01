@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from vidfactory.core.ffmpeg_runner import FFmpegRunner
+from vidfactory.core import music
 from vidfactory.core.gpu_detector import GPUConfig
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,11 @@ def _subtract(rng: Range, used: list[Range]) -> list[Range]:
     if cur < re:
         free.append((cur, re))
     return free
+
+
+def subtract_ranges(pool: list[Range], excluded: list[Range]) -> list[Range]:
+    """Remove `excluded` ranges (e.g. 'no_use' highlights) from every range in `pool`."""
+    return [free for rng in pool for free in _subtract(rng, excluded)]
 
 
 def _available_windows(pool: list[Range], needed: float, used: list[Range]) -> list[Range]:
@@ -136,8 +142,8 @@ def build_short(
     video_bitrate: str = "8M",
     audio_bitrate: str = "128k",
     music_bed: str | None = None,
-    music_volume: float = 0.35,
-    original_volume: float = 1.0,
+    music_volume: float = 0.8,
+    original_volume: float = 0.4,
     progress_cb: ProgressCb = None,
     cancel_event=None,
 ) -> dict:
@@ -187,7 +193,7 @@ def build_short(
         bed_idx = idx
         idx += 1
         fc += (
-            f";[outa]volume={original_volume}[am];[{bed_idx}:a]volume={music_volume}[bm];"
+            f";[outa]{music.original_audio_filter(original_volume)}[am];[{bed_idx}:a]volume={music_volume}[bm];"
             f"[am][bm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
         )
         audio_map = "[aout]"

@@ -12,7 +12,7 @@
   let inT = null, outT = null;
   let hints = [];
 
-  const ROLE_COLOR = { normal: "#0ea5e9", launch: "#10b981", landing: "#f43f5e" };
+  const ROLE_COLOR = { normal: "#0ea5e9", launch: "#10b981", landing: "#f43f5e", no_use: "#64748b" };
 
   // Flightlog segment kinds -> marker style. Unknown/future kinds fall back to DEFAULT_HINT_STYLE
   // so new segment kinds from Flightlog show up immediately with no code change here.
@@ -68,7 +68,7 @@
   // and always add their own duration. Only highlights flagged "use in summary" count, since
   // that's exactly what a real summary build would include (see build_summary_ep).
   function mergedSummarySeconds(hls) {
-    const included = hls.filter((h) => h.use_in_summary);
+    const included = hls.filter((h) => h.use_in_summary && h.role !== "no_use");
     const videos = included
       .filter((h) => h.type === "video")
       .sort((a, b) => a.start - b.start || a.end - b.end);
@@ -93,8 +93,8 @@
     highlights.forEach((h) => {
       const row = document.createElement("div");
       row.className = "flex items-center justify-between py-1 gap-2";
-      const tag = h.role !== "normal" ? ` [${h.role}]` : "";
-      const flags = (h.make_short ? "🎬" : "") + (h.use_in_summary ? "" : " (excl)");
+      const tag = h.role === "no_use" ? " 🚫 [no use]" : (h.role !== "normal" ? ` [${h.role}]` : "");
+      const flags = h.role === "no_use" ? "" : (h.make_short ? "🎬" : "") + (h.use_in_summary ? "" : " (excl)");
       const icon = h.type === "picture" ? "🖼 " : "";
       const range = h.type === "picture"
         ? `${fmt(h.start)} (${(h.duration || 5).toFixed(1)}s)`
@@ -160,6 +160,22 @@
     shortChk.disabled = type === "picture";
     if (type === "picture") {
       roleSel.value = "normal";
+      shortChk.checked = false;
+    }
+    applyRoleUI();
+  }
+
+  // A "no use" range is a negative highlight: never summary content, never a short source, so the
+  // two flags are forced off (the server also ignores them for that role).
+  function applyRoleUI() {
+    const noUse = document.getElementById("f-role").value === "no_use";
+    const summaryChk = document.getElementById("f-summary");
+    const shortChk = document.getElementById("f-short");
+    const picture = document.querySelector('input[name="f-type"]:checked').value === "picture";
+    summaryChk.disabled = noUse;
+    shortChk.disabled = noUse || picture;
+    if (noUse) {
+      summaryChk.checked = false;
       shortChk.checked = false;
     }
   }
@@ -270,6 +286,10 @@
   });
 
   // events
+  document.getElementById("f-role").addEventListener("change", () => {
+    applyRoleUI();
+    log("role ->", document.getElementById("f-role").value);
+  });
   document.getElementById("set-in").addEventListener("click", () => {
     inT = player.currentTime; document.getElementById("in-label").textContent = fmt(inT); draw();
   });

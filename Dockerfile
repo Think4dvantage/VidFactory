@@ -12,6 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
+# deno: the JavaScript runtime yt-dlp uses to solve YouTube's player challenges (M28 full-flight
+# download). Without it yt-dlp warns "No supported JavaScript runtime" and falls back to less
+# reliable extraction clients. It also needs the yt-dlp-ejs solver scripts, which come from the
+# `yt-dlp[default]` extra in pyproject.toml -- deno alone is not enough. Copied from the official
+# image (no curl in python:3.11-slim); floats to latest like every other dependency here.
+COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
+
 WORKDIR /app
 
 RUN pip install --no-cache-dir poetry \

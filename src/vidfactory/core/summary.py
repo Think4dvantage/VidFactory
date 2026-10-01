@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from vidfactory.core.ffmpeg_runner import FFmpegRunner
+from vidfactory.core import music
 from vidfactory.core.gpu_detector import GPUConfig
 
 logger = logging.getLogger(__name__)
@@ -30,13 +31,15 @@ def _seg_duration(seg: dict) -> float:
 
 
 def auto_fill(segments: list[dict], target_seconds: float, full_duration: float,
-              filler_len: float = 5.0) -> list[dict]:
-    """Add evenly-distributed, non-overlapping filler video segments until ~target_seconds."""
+              filler_len: float = 5.0, exclude: list[tuple[float, float]] | None = None) -> list[dict]:
+    """Add evenly-distributed, non-overlapping filler video segments until ~target_seconds.
+    Filler never lands in an `exclude` range ('no_use' highlights)."""
     total = sum(_seg_duration(s) for s in segments)
     if total >= target_seconds or full_duration <= 0:
         return sorted(segments, key=lambda s: s["start"])
 
     video_ranges = [(s["start"], s["end"]) for s in segments if s["type"] == "video"]
+    video_ranges += exclude or []
 
     def overlaps(a: float, b: float) -> bool:
         return any(a < r_end and b > r_start for r_start, r_end in video_ranges)
@@ -103,8 +106,8 @@ def build_summary(
     video_bitrate: str = "20M",
     audio_bitrate: str = "192k",
     music_bed: str | None = None,
-    music_volume: float = 0.35,
-    original_volume: float = 1.0,
+    music_volume: float = 0.8,
+    original_volume: float = 0.4,
     cta_image: str,
     cta_duration: float,
     cta_line1: str,
@@ -189,7 +192,7 @@ def build_summary(
         bed_idx = next_idx
         next_idx += 1
         fc += (
-            f";[outa]volume={original_volume}[am]"
+            f";[outa]{music.original_audio_filter(original_volume)}[am]"
             f";[{bed_idx}:a]volume={music_volume}[bm]"
             f";[am][bm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
         )
@@ -232,8 +235,8 @@ def build_fullflight_with_music(
     runner: FFmpegRunner,
     gpu: GPUConfig,
     *,
-    music_volume: float = 0.35,
-    original_volume: float = 1.0,
+    music_volume: float = 0.8,
+    original_volume: float = 0.4,
     audio_bitrate: str = "192k",
     video_bitrate: str = "20M",
     cta_image: str,
@@ -266,7 +269,7 @@ def build_fullflight_with_music(
         if stage_cb:
             stage_cb("Mixing music")
         fc = (
-            f"[0:a]volume={original_volume}[am];"
+            f"[0:a]{music.original_audio_filter(original_volume)}[am];"
             f"[1:a]volume={music_volume}[bm];"
             f"[am][bm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
         )

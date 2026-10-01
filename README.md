@@ -26,6 +26,8 @@ app.
   same "Like & Subscribe" CTA screen as Shorts, with the music still playing under it.
 - **Shorts** — vertical 1080×1920, from named highlights (hook → launch? → flying → landing? → CTA,
   <30 s) or from random pools; batch de-dup so footage is never reused.
+- **"No use" highlights** — flag parts of a flight as not for publication; Summary auto-fill and
+  the random Shorts filler stay out of them.
 - **One build queue** — every render (concat, preview, summary, full-flight+music, shorts) goes
   through a single FIFO queue, one job at a time. Queue up several builds and walk away; the
   progress UI shows queue position and elapsed time so a still-waiting job never looks stuck.
@@ -84,9 +86,9 @@ a global build queue with live progress. This repo is tagged through `v0.4.18`, 
 `v0.4.8` — picture-highlight upload, per-short job-queue rows, the Summary/Full-flight+music CTA
 end screen, fixes to music-credit attribution and duplicate Shorts launch clips, and downloading
 a full flight from YouTube via its Flightlog link — is only verified locally, not yet redeployed.
-The YouTube download has never run for real (needs a host with outbound access; `yt-dlp` may
-need a JS runtime or cookies there), and *Full flight + music* on a downloaded 4K file is
-unsupported (VP9/AV1 vs. the H.264 CTA join). **Next:** redeploy the newer tags to `sdh`, exact
+A multi-GB YouTube download has not completed on `sdh` yet (a 4K extraction and a small clip were tested end to end);
+*Full flight + music* refuses VP9/AV1 downloads. The audio mix now defaults to music leading with the flight's own
+sound only on peaks. **Next:** redeploy the newer tags to `sdh`, exact
 Summary-video chapter timestamps, and getting the external YouTube-management tool actually
 talking to `/api/integration/v1`. See `.ai/context/features.md` for the full milestone history and
 `.ai/` for full context.

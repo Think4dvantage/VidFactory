@@ -30,8 +30,11 @@ encode:
   audio_bitrate: "192k"
 
 music:
-  music_volume: 0.35                # gain on music before mixing
-  original_audio_volume: 1.0        # gain on original/clip audio
+  music_volume: 0.8                 # gain on music before mixing (music leads)
+  original_audio_volume: 0.4        # gain on original/clip audio
+  original_audio_gate: true         # original sound stays faint and only comes through on peaks
+  original_audio_gate_threshold: 0.08   # linear level that counts as a peak
+  original_audio_gate_range: 0.25       # gain below the threshold (0.25 = -12 dB)
 
 shorts:
   clip_duration: 3.0        # length of each sampled flying/hike clip, seconds

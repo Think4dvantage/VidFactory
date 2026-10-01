@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
@@ -105,6 +106,7 @@ def project_page(project_id: int, request: Request, db: Session = Depends(get_db
             "short_credits": short_credits,
             "summary_credits": projects.read_credits_text(project.summary_file),
             "fullmusic_credits": projects.read_credits_text(project.fullflight_music_file),
+            "can_download_youtube": bool(project.external_flight_id) and _can_offer_youtube_download(project),
         },
     )
 
@@ -266,7 +268,9 @@ async def set_flightlog_id(project_id: int, request: Request, db: Session = Depe
     if (
         project.external_flight_id
         and _can_offer_youtube_download(project)
-        and youtube_download.resolve_fullflight_url(project)
+        # Blocking httpx call (10s timeout) -- off the event loop so a slow Flightlog can't
+        # stall every other request and SSE stream.
+        and await run_in_threadpool(youtube_download.resolve_fullflight_url, project)
     ):
         logger.info("[VF:projects] project=%s flight=%s has a YouTube full flight — offering download",
                     project_id, project.external_flight_id)
@@ -275,7 +279,10 @@ async def set_flightlog_id(project_id: int, request: Request, db: Session = Depe
 
 
 def _can_offer_youtube_download(project: Project) -> bool:
-    return not project.full_flight_file and not project.source_parts
+    # Checks the file on disk, not just the column: a full flight deleted via the file browser
+    # leaves full_flight_file set, which would otherwise block a re-download forever.
+    has_full_flight = bool(project.full_flight_file) and Path(project.full_flight_file).exists()
+    return not has_full_flight and not project.source_parts
 
 
 @router.post("/api/projects/{project_id}/fullflight/download-youtube", include_in_schema=False)
@@ -292,6 +299,18 @@ def download_youtube_fullflight(project_id: int, db: Session = Depends(get_db), 
         return _error(404, "NO_YOUTUBE_FULLFLIGHT", "No YouTube link labelled \"Full Flight\" found on this flight in Flightlog.")
     job = registry.run("ytdownload", user.id, _ytdownload_target(project_id, user.id, url), project_id=project_id)
     return {"job_id": job.id}
+
+
+_FULLMUSIC_UNSUPPORTED_CODECS = {"vp9", "av1"}
+
+
+def _video_codec(path: str) -> str | None:
+    try:
+        streams = get_runner().probe(path).get("streams", [])
+    except (RuntimeError, OSError, ValueError) as exc:
+        logger.warning("could not probe video codec of %s: %s", path, exc)
+        return None
+    return streams[0].get("codec_name") if streams else None
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
@@ -538,8 +557,8 @@ async def build_summary_ep(project_id: int, request: Request, db: Session = Depe
     form = await request.form()
     target = float(form.get("target_seconds") or 90)
     music_path = str(form.get("music_path") or "")
-    mv = float(form.get("music_volume") or 0.35)
-    ov = float(form.get("original_volume") or 1.0)
+    mv = float(form.get("music_volume") or get_config().music.music_volume)
+    ov = float(form.get("original_volume") or get_config().music.original_audio_volume)
     if registry.find_active("summary", project_id):
         return _build_conflict("summary")
     job = registry.run(
@@ -560,10 +579,21 @@ async def build_fullmusic_ep(project_id: int, request: Request, db: Session = De
     music_path = str(form.get("music_path") or "")
     if not music_path:
         return Response("Select music.", status_code=400)
-    mv = float(form.get("music_volume") or 0.35)
-    ov = float(form.get("original_volume") or 1.0)
+    mv = float(form.get("music_volume") or get_config().music.music_volume)
+    ov = float(form.get("original_volume") or get_config().music.original_audio_volume)
     if registry.find_active("fullmusic", project_id):
         return _build_conflict("fullmusic")
+    # Video is stream-copied and joined (-c copy) to an H.264 CTA screen, which only works when
+    # the codecs match. YouTube's 4K downloads are VP9/AV1 -- refuse up front instead of
+    # writing a broken file. (Summary and Shorts re-encode, so they're unaffected.)
+    codec = await run_in_threadpool(_video_codec, project.full_flight_file)
+    if codec in _FULLMUSIC_UNSUPPORTED_CODECS:
+        logger.warning("fullmusic refused — project=%s full flight codec=%s", project_id, codec)
+        return _error(
+            400, "UNSUPPORTED_CODEC",
+            f"Full flight + music can't be built from a {codec.upper()} video (e.g. a 4K YouTube "
+            "download): the end screen is joined without re-encoding. Use Summary or Shorts instead.",
+        )
     job = registry.run(
         "fullmusic", user.id, _fullmusic_target(project_id, user.id, music_path, mv, ov),
         project_id=project_id,
@@ -582,8 +612,8 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
     mode = str(form.get("mode") or "highlight")
     count = int(form.get("count") or 1)
     music_path = str(form.get("music_path") or "")
-    mv = float(form.get("music_volume") or 0.35)
-    ov = float(form.get("original_volume") or 1.0)
+    mv = float(form.get("music_volume") or get_config().music.music_volume)
+    ov = float(form.get("original_volume") or get_config().music.original_audio_volume)
     cfg = get_config()
     # One task per short to build -- resolved here (cheap: DB only, no ffprobe/ffmpeg) so each
     # becomes its own queued job below, rather than one "shorts" job silently building N videos
@@ -593,7 +623,7 @@ async def build_shorts_ep(project_id: int, request: Request, db: Session = Depen
         hls = highlights.list_highlights(db, project_id)
         tasks = [
             ((hl.start, min(hl.end, hl.start + cfg.shorts.hook_max)), hl.name, hl.id)
-            for hl in hls if hl.make_short
+            for hl in hls if hl.make_short and hl.role != highlights.NO_USE
         ]
         if not tasks:
             return Response("No highlights flagged 'make short'.", status_code=400)
@@ -669,6 +699,7 @@ def _short_target(
             gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
             w, h, dur = runner.get_video_info(full)
             hls = highlights.list_highlights(db, project_id)
+            skip = highlights.no_use_ranges(hls)  # random hike/flying picks stay out of these
             launch = _role_clip(hls, "launch", sc.launch_max)
             landing = _role_clip(hls, "landing", sc.landing_max)
             # A highlight-driven short built *from* the launch highlight already plays it as the
@@ -686,7 +717,7 @@ def _short_target(
             hike_pool: list[tuple[float, float]] = []
             if use_hike:
                 hike_end = max(0.0, min(hike_output_duration(list(hike.sources), hike.speed_factor, runner), dur))
-                hike_pool = [(0.0, hike_end)]
+                hike_pool = shorts_engine.subtract_ranges([(0.0, hike_end)], skip)
                 # launch/landing are user-marked and bypass the flying pool entirely (never
                 # de-duped against `used`, never clamped here) — if a pilot marked launch while
                 # still inside the sped-up hike segment, the "launch" clip is actually hike
@@ -699,7 +730,7 @@ def _short_target(
                         project_id, launch[0], hike_end,
                     )
 
-            pool = _flying_pool(project, dur, start=hike_end)
+            pool = shorts_engine.subtract_ranges(_flying_pool(project, dur, start=hike_end), skip)
 
             job.set_stage("Picking clips")
             hike_clips = (
@@ -771,9 +802,11 @@ def _summary_target(project_id: int, owner_id: int, target_seconds: float, music
             gpu = gpu_detector.detect(cfg.ffmpeg.ffmpeg_path)
             w, h, full_dur = runner.get_video_info(full)
             fps = _probe_fps(runner, full)
-            hls = [hl for hl in highlights.list_highlights(db, project_id) if hl.use_in_summary]
-            segs = highlights.merge_overlaps(hls)
-            segs = summary.auto_fill(segs, target_seconds, full_dur)
+            all_hls = highlights.list_highlights(db, project_id)
+            segs = highlights.merge_overlaps([hl for hl in all_hls if hl.use_in_summary])
+            segs = summary.auto_fill(
+                segs, target_seconds, full_dur, exclude=highlights.no_use_ranges(all_hls),
+            )
             # +cta_duration: the CTA end screen rides along at the end of every summary (see
             # build_summary), so the music bed needs to be long enough to still be playing then.
             total = sum(summary._seg_duration(s) for s in segs) + cfg.shorts.cta_duration

@@ -120,7 +120,7 @@ class Highlight(Base):
     end: Mapped[float] = mapped_column("end_s", Float, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String, default="video")  # 'video' | 'picture'
-    role: Mapped[str] = mapped_column(String, default="normal")  # 'normal' | 'launch' | 'landing'
+    role: Mapped[str] = mapped_column(String, default="normal")  # 'normal' | 'launch' | 'landing' | 'no_use'
     image_path: Mapped[str | None] = mapped_column(String)
     duration: Mapped[float | None] = mapped_column(Float)
     use_in_summary: Mapped[bool] = mapped_column(Boolean, default=True)

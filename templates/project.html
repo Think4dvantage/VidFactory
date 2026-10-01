@@ -42,6 +42,10 @@
       <p class="text-slate-500 text-sm">Loading build plan…</p>
     </div>
     <button id="build-btn" class="rounded bg-emerald-700 hover:bg-emerald-600 px-3 py-1 text-sm">▶ Build Full Flight</button>
+    {% if can_download_youtube %}
+    <button id="yt-download-btn" class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1 text-sm"
+            title="Downloads the flight's 'Full Flight' video from YouTube (link taken from Flightlog); resumes a partial download">⬇ Download full flight from YouTube</button>
+    {% endif %}
     <div id="build-progress" class="mt-2 text-sm" hidden>
       <div class="text-slate-300"><span id="b-stage"></span> — <span id="b-pct">0</span>% <span id="b-speed" class="text-slate-500"></span> <span id="b-elapsed" class="text-slate-500"></span></div>
       <progress id="b-bar" max="100" value="0" class="w-full"></progress>
@@ -416,6 +420,9 @@ document.querySelectorAll('[data-build]').forEach((btn) => {
 function followFullFlightBuild(btn, jobId) {
   document.getElementById('build-progress').hidden = false;
   btn.disabled = true;
+  const ytBtn = document.getElementById('yt-download-btn');
+  if (ytBtn) ytBtn.disabled = true;
+  const reenable = () => { btn.disabled = false; if (ytBtn) ytBtn.disabled = false; };
   window.VF.followJob(jobId, (d) => {
     document.getElementById('b-stage').textContent = stageLabel(d);
     document.getElementById('b-pct').textContent = d.percent;
@@ -426,10 +433,10 @@ function followFullFlightBuild(btn, jobId) {
       document.getElementById('b-pct').textContent = '100';
       document.getElementById('b-bar').value = 100;
       document.getElementById('build-result').textContent = '✅ ' + (d.result || '') + ` — took ${formatElapsed(d.elapsed_seconds)}`;
-      btn.disabled = false;
+      reenable();
     }
-    if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); btn.disabled = false; }
-    if (d.status === 'cancelled') { document.getElementById('build-result').textContent = 'Cancelled'; btn.disabled = false; }
+    if (d.status === 'error') { document.getElementById('build-result').textContent = '❌ ' + (d.message || 'failed'); reenable(); }
+    if (d.status === 'cancelled') { document.getElementById('build-result').textContent = 'Cancelled'; reenable(); }
   });
 }
 
@@ -447,15 +454,11 @@ document.getElementById('build-btn').addEventListener('click', async () => {
 // Saving a Flightlog id on a footage-less project triggers this when the flight already has a
 // "Full Flight" video on YouTube (see set_flightlog_id) -- the server sends HX-Trigger instead of
 // its usual redirect, so this page is responsible for the reload if the download is declined.
-document.body.addEventListener('vf-youtube-offer', async () => {
-  console.log('[VF:project] YouTube full flight found on Flightlog — offering download');
-  if (!confirm('This flight has its Full Flight on YouTube (per Flightlog). Download it at best quality (4K if available) to use here?')) {
-    console.log('[VF:project] YouTube download declined — reloading');
-    location.reload();
-    return;
-  }
+async function startYoutubeDownload() {
   const btn = document.getElementById('build-btn');
+  const ytBtn = document.getElementById('yt-download-btn');
   btn.disabled = true;
+  if (ytBtn) ytBtn.disabled = true;
   console.log('[VF:project] POST /api/projects/{{ project.id }}/fullflight/download-youtube');
   const r = await fetch('/api/projects/{{ project.id }}/fullflight/download-youtube', { method: 'POST' });
   if (!r.ok) {
@@ -464,11 +467,28 @@ document.body.addEventListener('vf-youtube-offer', async () => {
     try { msg = JSON.parse(msg).error.message; } catch (e) { /* not a JSON error body */ }
     document.getElementById('build-result').textContent = '❌ ' + msg;
     btn.disabled = false;
+    if (ytBtn) ytBtn.disabled = false;
     return;
   }
   const { job_id } = await r.json();
   console.log(`[VF:project] YouTube download queued — job ${job_id}; server log: "Job [ytdownload]"`);
   followFullFlightBuild(btn, job_id);
+}
+
+document.body.addEventListener('vf-youtube-offer', () => {
+  console.log('[VF:project] YouTube full flight found on Flightlog — offering download');
+  if (!confirm('This flight has its Full Flight on YouTube (per Flightlog). Download it at best quality (4K if available) to use here?')) {
+    console.log('[VF:project] YouTube download declined — reloading');
+    location.reload();
+    return;
+  }
+  startYoutubeDownload();
+});
+
+const ytDownloadBtn = document.getElementById('yt-download-btn');
+if (ytDownloadBtn) ytDownloadBtn.addEventListener('click', () => {
+  console.log('[VF:project] YouTube download requested via button');
+  startYoutubeDownload();
 });
 
 // Resume watching any build already running for this project -- e.g. after navigating away

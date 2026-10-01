@@ -88,14 +88,16 @@ def test_set_flightlog_id_offers_download(auth_client, db_session, user, monkeyp
     assert YT not in r.text
 
 
-def test_set_flightlog_id_redirects_when_nothing_to_offer(auth_client, db_session, user, monkeypatch):
+def test_set_flightlog_id_redirects_when_nothing_to_offer(auth_client, db_session, user, monkeypatch, tmp_path):
     p = _project(db_session, user)
     monkeypatch.setattr(youtube_download, "resolve_fullflight_url", lambda project: None)
     r = auth_client.post(f"/api/projects/{p.id}/flightlog-id", data={"external_flight_id": "f1"})
     assert r.headers["HX-Redirect"] == f"/projects/{p.id}"
 
     # existing footage -> no lookup, no offer
-    q = _project(db_session, user, full_flight_file="ff.mp4")
+    ff = tmp_path / "ff.mp4"
+    ff.write_bytes(b"x")
+    q = _project(db_session, user, full_flight_file=str(ff))
     monkeypatch.setattr(youtube_download, "resolve_fullflight_url", lambda project: YT)
     r = auth_client.post(f"/api/projects/{q.id}/flightlog-id", data={"external_flight_id": "f1"})
     assert "HX-Trigger" not in r.headers
@@ -116,12 +118,14 @@ def test_download_endpoint_queues_job(auth_client, db_session, user, monkeypatch
     assert seen == {"kind": "ytdownload", "project_id": p.id}
 
 
-def test_download_endpoint_refusals(auth_client, db_session, user, monkeypatch):
+def test_download_endpoint_refusals(auth_client, db_session, user, monkeypatch, tmp_path):
     monkeypatch.setattr(youtube_download, "resolve_fullflight_url", lambda project: None)
     p = _project(db_session, user)
     assert auth_client.post(f"/api/projects/{p.id}/fullflight/download-youtube").status_code == 404
 
-    has_ff = _project(db_session, user, full_flight_file="ff.mp4")
+    ff = tmp_path / "ff.mp4"
+    ff.write_bytes(b"x")
+    has_ff = _project(db_session, user, full_flight_file=str(ff))
     r = auth_client.post(f"/api/projects/{has_ff.id}/fullflight/download-youtube")
     assert r.status_code == 409 and r.json()["error"]["code"] == "HAS_FOOTAGE"
 
@@ -179,6 +183,10 @@ def test_download_passes_best_quality_options(tmp_path, monkeypatch):
     assert res["output"] == str(tmp_path / "out.mp4")
     assert captured["urls"] == [YT]
     assert captured["opts"]["ffmpeg_location"] == "/usr/bin/ffmpeg"  # resolved, not the bare name
+    o = captured["opts"]
+    assert o["overwrites"] is False  # keep finished streams from an earlier attempt
+    assert o["retries"] == 10 and o["fragment_retries"] == 10 and o["extractor_retries"] == 3
+    assert o["http_chunk_size"] == 10 * 1024 * 1024
     assert captured["opts"]["format"] == "bv*+ba/b"
     assert captured["opts"]["merge_output_format"] == "mp4"
     assert captured["opts"]["outtmpl"] == str(tmp_path / "out") + ".%(ext)s"
@@ -205,3 +213,125 @@ def test_download_cancel_via_hook(tmp_path, monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake)
     with pytest.raises(youtube_download.DownloadCancelled):
         youtube_download.download(YT, str(tmp_path / "o.mp4"), cancel_event=cancel)
+
+
+class _Err(Exception):
+    pass
+
+
+def _flaky_ydl(tmp_path, errors):
+    """A fake yt_dlp whose download() raises each of `errors` in turn, then succeeds."""
+    calls = {"n": 0}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def download(self, urls):
+            calls["n"] += 1
+            if errors:
+                raise _Err(errors.pop(0))
+            (tmp_path / "o.mp4").write_bytes(b"x")
+
+    return SimpleNamespace(YoutubeDL=FakeYDL, utils=SimpleNamespace(DownloadError=_Err)), calls
+
+
+def test_retries_transient_http_error_then_succeeds(tmp_path, monkeypatch):
+    fake, calls = _flaky_ydl(tmp_path, ["unable to download video data: HTTP Error 403: Forbidden"])
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake)
+    monkeypatch.setattr(youtube_download, "_BACKOFF_S", 0)
+    stages = []
+    res = youtube_download.download(YT, str(tmp_path / "o.mp4"), stage_cb=stages.append)
+    assert res["output"] == str(tmp_path / "o.mp4")
+    assert calls["n"] == 2
+    assert "Retrying download (2/4)" in stages
+
+
+def test_gives_up_after_max_attempts(tmp_path, monkeypatch):
+    fake, calls = _flaky_ydl(tmp_path, ["HTTP Error 403: Forbidden"] * 10)
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake)
+    monkeypatch.setattr(youtube_download, "_BACKOFF_S", 0)
+    with pytest.raises(_Err):
+        youtube_download.download(YT, str(tmp_path / "o.mp4"))
+    assert calls["n"] == youtube_download._ATTEMPTS
+
+
+def test_non_http_error_is_not_retried(tmp_path, monkeypatch):
+    fake, calls = _flaky_ydl(tmp_path, ["Private video. Sign in if you've been granted access"])
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake)
+    monkeypatch.setattr(youtube_download, "_BACKOFF_S", 0)
+    with pytest.raises(_Err):
+        youtube_download.download(YT, str(tmp_path / "o.mp4"))
+    assert calls["n"] == 1
+
+
+def test_cancel_during_retry_wait(tmp_path, monkeypatch):
+    fake, calls = _flaky_ydl(tmp_path, ["HTTP Error 403: Forbidden"] * 10)
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake)
+    monkeypatch.setattr(youtube_download, "_BACKOFF_S", 0.01)
+    cancel = threading.Event()
+    cancel.set()  # cancelled before/while backing off
+    with pytest.raises(youtube_download.DownloadCancelled):
+        youtube_download.download(YT, str(tmp_path / "o.mp4"), cancel_event=cancel)
+    assert calls["n"] == 1
+
+
+def test_missing_full_flight_file_does_not_block_redownload(auth_client, db_session, user, monkeypatch):
+    # full_flight_file is set but the file was deleted (e.g. via the file browser)
+    p = _project(db_session, user, full_flight_file="/nonexistent/ff.mp4", external_flight_id="f1")
+    monkeypatch.setattr(youtube_download, "resolve_fullflight_url", lambda project: YT)
+    monkeypatch.setattr(projects_router.registry, "run", lambda *a, **k: SimpleNamespace(id="j"))
+    assert auth_client.post(f"/api/projects/{p.id}/fullflight/download-youtube").json() == {"job_id": "j"}
+    assert 'id="yt-download-btn"' in auth_client.get(f"/projects/{p.id}").text
+
+
+def test_download_button_only_with_flight_id_and_no_footage(auth_client, db_session, user, tmp_path):
+    no_id = _project(db_session, user)
+    assert 'id="yt-download-btn"' not in auth_client.get(f"/projects/{no_id.id}").text
+    ff = tmp_path / "ff.mp4"
+    ff.write_bytes(b"x")
+    has_ff = _project(db_session, user, external_flight_id="f1", full_flight_file=str(ff))
+    assert 'id="yt-download-btn"' not in auth_client.get(f"/projects/{has_ff.id}").text
+    ok = _project(db_session, user, external_flight_id="f1")
+    assert 'id="yt-download-btn"' in auth_client.get(f"/projects/{ok.id}").text
+
+
+def test_merge_postprocessor_hook_sets_stage(tmp_path, monkeypatch):
+    class FakeYDL:
+        def __init__(self, opts):
+            self.pp = opts["postprocessor_hooks"][0]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def download(self, urls):
+            self.pp({"postprocessor": "FFmpegMetadata", "status": "started"})  # ignored
+            self.pp({"postprocessor": "Merger", "status": "started"})
+            self.pp({"postprocessor": "Merger", "status": "finished"})
+            (tmp_path / "o.mp4").write_bytes(b"x")
+
+    fake = SimpleNamespace(YoutubeDL=FakeYDL, utils=SimpleNamespace(DownloadError=RuntimeError))
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake)
+    stages = []
+    youtube_download.download(YT, str(tmp_path / "o.mp4"), stage_cb=stages.append)
+    assert stages == ["Downloading from YouTube", "Merging video+audio (ffmpeg)"]
+
+
+@pytest.mark.parametrize("codec,status", [("vp9", 400), ("av1", 400), ("h264", 200)])
+def test_fullmusic_refuses_vp9_av1(auth_client, db_session, user, monkeypatch, codec, status):
+    p = _project(db_session, user, full_flight_file="ff.mp4")
+    monkeypatch.setattr(projects_router, "_video_codec", lambda path: codec)
+    monkeypatch.setattr(projects_router.registry, "run", lambda *a, **k: SimpleNamespace(id="j"))
+    r = auth_client.post(f"/api/projects/{p.id}/fullmusic/build", data={"music_path": "/m"})
+    assert r.status_code == status
+    if status == 400:
+        assert r.json()["error"]["code"] == "UNSUPPORTED_CODEC"

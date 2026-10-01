@@ -9,7 +9,7 @@ class HighlightIn(BaseModel):
     end: float
     comment: str | None = None
     type: str = "video"          # 'video' | 'picture'
-    role: str = "normal"         # 'normal' | 'launch' | 'landing'
+    role: str = "normal"         # 'normal' | 'launch' | 'landing' | 'no_use'
     image_path: str | None = None
     duration: float | None = None
     use_in_summary: bool = True
